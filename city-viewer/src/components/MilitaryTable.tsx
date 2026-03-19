@@ -408,8 +408,8 @@ export default function MilitaryTable() {
 
       const totalUnits = UNIT_CLASSES.reduce((s, c) => s + classDetails[c].amount, 0) + otherDetail.amount;
 
-      // Check if building can be upgraded to current era
-      const upgradeable = eraRank >= 0 && eraRank < currentEraRank;
+      // Check if building can be upgraded to current era (only production reward buildings)
+      const upgradeable = source === 'reward' && eraRank >= 0 && eraRank < currentEraRank;
       let upgClassDetails: Record<UnitClassKey, ClassCell> | null = null;
       let upgOtherDetail: ClassCell | null = null;
       let upgTotalUnits = 0;
@@ -640,19 +640,6 @@ export default function MilitaryTable() {
       header: 'Cycle',
       cell: info => info.getValue() > 0 ? formatTime(info.getValue()) : '—',
     }),
-    columnHelper.display({
-      id: 'slots',
-      header: 'Slots',
-      cell: info => {
-        const r = info.row.original;
-        if (r.source !== 'barracks' || r.totalSlots === 0) return '—';
-        return (
-          <span title={`${r.unlockedSlots} unlocked / ${r.totalSlots} total, ${r.slotsInUse} in use`}>
-            {r.slotsInUse}/{r.unlockedSlots}/{r.totalSlots}
-          </span>
-        );
-      },
-    }),
     columnHelper.accessor('size', { header: 'Size' }),
   ], []);
 
@@ -876,34 +863,6 @@ function MilitaryDetail({ row }: { row: MilitaryRow }) {
           )}
         </div>
 
-        {row.source === 'barracks' && row.totalSlots > 0 && (
-          <div className="detail-section">
-            <h4>Slots ({row.count > 1 ? `${row.count} buildings` : '1 building'})</h4>
-            <p><strong>Total:</strong> {row.totalSlots} &nbsp; <strong>Unlocked:</strong> {row.unlockedSlots} &nbsp; <strong>In Use:</strong> {row.slotsInUse}</p>
-            {entries.map((e, ei) => e.unitSlots && e.unitSlots.length > 0 && (
-              <div key={ei} style={{ marginTop: '0.5rem' }}>
-                {row.count > 1 && <p style={{ fontWeight: 600, marginBottom: '0.25rem' }}>Building #{ei + 1}</p>}
-                {e.unitSlots.map((slot, i) => {
-                  const canUnlock = !slot.unlocked && slot.is_unlockable;
-                  const costs = slot.unlockCosts?.resources;
-                  const costEntries = costs && !Array.isArray(costs) ? Object.entries(costs).filter(([, v]) => v > 0) : [];
-                  return (
-                    <div key={i} className="slot-info">
-                      <span className={`slot-status ${slot.unlocked ? 'unlocked' : canUnlock ? 'unlockable' : 'locked'}`}>
-                        Slot {i + 1}: {slot.unlocked ? '✓ Unlocked' : canUnlock ? '🔓 Unlockable' : '🔒 Locked'}
-                      </span>
-                      {canUnlock && costEntries.length > 0 && (
-                        <span className="slot-cost">
-                          ({costEntries.map(([k, v]) => `${formatNumber(v as number)} ${formatResourceName(k)}`).join(', ')})
-                        </span>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            ))}
-          </div>
-        )}
       </div>
     </div>
   );
