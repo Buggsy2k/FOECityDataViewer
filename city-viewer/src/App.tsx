@@ -6,11 +6,10 @@ import BuildingTable from './components/BuildingTable';
 import CityGrid from './components/CityGrid';
 import GreatBuildings from './components/GreatBuildings';
 import MilitaryTable from './components/MilitaryTable';
-import JsonViewer from './components/JsonViewer';
 import { aggregateProduction, formatNumber } from './utils/dataProcessing';
 import './App.css';
 
-type Tab = 'production' | 'buildings' | 'military' | 'grid' | 'greatbuildings' | 'json';
+type Tab = 'production' | 'buildings' | 'military' | 'grid' | 'greatbuildings';
 
 function AppContent() {
   const { data, setData } = useCityData();
@@ -60,7 +59,6 @@ function AppContent() {
           ['military', '⚔️ Military Units'],
           ['grid', '🗺️ Grid Map'],
           ['greatbuildings', '🏛️ Great Buildings'],
-          ['json', '{ } JSON'],
         ] as [Tab, string][]).map(([key, label]) => (
           <button
             key={key}
@@ -78,7 +76,6 @@ function AppContent() {
         {activeTab === 'military' && <MilitaryTable />}
         {activeTab === 'grid' && <CityGrid />}
         {activeTab === 'greatbuildings' && <GreatBuildings />}
-        {activeTab === 'json' && <JsonViewer />}
       </main>
     </div>
   );
