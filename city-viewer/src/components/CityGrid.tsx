@@ -160,6 +160,43 @@ export default function CityGrid() {
 
   const hasSearch = searchText.trim().length > 0;
 
+  // Precompute set of grid cells occupied by streets for geometric road adjacency
+  const streetCells = useMemo(() => {
+    const cells = new Set<string>();
+    for (const b of allBuildings) {
+      if (b.entry.type !== 'street') continue;
+      for (let dx = 0; dx < b.width; dx++) {
+        for (let dy = 0; dy < b.length; dy++) {
+          cells.add(`${b.x + dx},${b.y + dy}`);
+        }
+      }
+    }
+    return cells;
+  }, [allBuildings]);
+
+  // Precompute which buildings physically touch a street (share an edge)
+  const touchesRoadSet = useMemo(() => {
+    const result = new Set<number>();
+    for (const b of allBuildings) {
+      if (b.entry.type === 'street') continue;
+      let found = false;
+      // Check all edge cells around the building perimeter
+      for (let dx = -1; dx <= b.width && !found; dx++) {
+        for (let dy = -1; dy <= b.length && !found; dy++) {
+          // Only check cells on the border (not interior and not corners-only)
+          const onEdge = dx === -1 || dx === b.width || dy === -1 || dy === b.length;
+          const isCorner = (dx === -1 || dx === b.width) && (dy === -1 || dy === b.length);
+          if (!onEdge || isCorner) continue;
+          if (streetCells.has(`${b.x + dx},${b.y + dy}`)) {
+            found = true;
+          }
+        }
+      }
+      if (found) result.add(b.entry.id);
+    }
+    return result;
+  }, [allBuildings, streetCells]);
+
   // Filtered buildings
   const buildings = useMemo(() => {
     return allBuildings.filter(b => {
@@ -445,12 +482,18 @@ export default function CityGrid() {
             const isMatch = hasSearch && searchMatches.has(b.entry.id);
             const dimmed = hasSearch && !isMatch && !isHovered;
             const entity = data.CityEntities?.[b.entry.cityentity_id];
-            const needsRoad = b.entry.type !== 'street' && (
+            const inherent = new Set(['street', 'main_building', 'tower', 'hub_main', 'hub_part', 'decoration']);
+            const needsRoad = !inherent.has(b.entry.type) && (
               (entity?.requirements?.street_connection_level ?? 0) > 0 ||
               Object.values(entity?.components ?? {}).some(
                 (c: any) => (c?.streetConnectionRequirement?.requiredLevel ?? 0) > 0
               )
             );
+            const touchesRoad = touchesRoadSet.has(b.entry.id);
+            const disconnected = needsRoad && !touchesRoad;
+            const wastedRoad = !needsRoad && touchesRoad && !inherent.has(b.entry.type);
+            const showBorder = (needsRoad || wastedRoad) && !dimmed;
+            const isRed = disconnected || wastedRoad;
 
             return (
               <g key={b.entry.id}>
@@ -472,15 +515,15 @@ export default function CityGrid() {
                   onMouseLeave={() => setHoveredBuilding(null)}
                   style={{ cursor: 'pointer' }}
                 />
-                {needsRoad && !dimmed && (
+                {showBorder && (
                   <rect
                     x={b.x * CELL_SIZE + 2}
                     y={b.y * CELL_SIZE + 2}
                     width={b.width * CELL_SIZE - 4}
                     height={b.length * CELL_SIZE - 4}
                     fill="none"
-                    stroke="rgba(255,255,255,0.6)"
-                    strokeWidth={0.8}
+                    stroke={isRed ? 'rgba(255,0,0,0.9)' : 'rgba(255,255,255,0.6)'}
+                    strokeWidth={isRed ? 1.5 : 0.8}
                     rx={0.5}
                     pointerEvents="none"
                   />

@@ -76,7 +76,7 @@ export const BUILDING_COLORS: Record<string, string> = {
   generic_building: '#4a90d9',
   street: '#666666',
   tower: '#9b59b6',
-  military: '#e74c3c',
+  military: '#1a4d1a',
   culture: '#27ae60',
   goods: '#2ecc71',
   production: '#e67e22',
