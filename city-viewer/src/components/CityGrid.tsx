@@ -444,27 +444,48 @@ export default function CityGrid() {
             const isHovered = hoveredBuilding?.entry.id === b.entry.id;
             const isMatch = hasSearch && searchMatches.has(b.entry.id);
             const dimmed = hasSearch && !isMatch && !isHovered;
+            const entity = data.CityEntities?.[b.entry.cityentity_id];
+            const needsRoad = b.entry.type !== 'street' && (
+              (entity?.requirements?.street_connection_level ?? 0) > 0 ||
+              Object.values(entity?.components ?? {}).some(
+                (c: any) => (c?.streetConnectionRequirement?.requiredLevel ?? 0) > 0
+              )
+            );
 
             return (
-              <rect
-                key={b.entry.id}
-                x={b.x * CELL_SIZE + 0.5}
-                y={b.y * CELL_SIZE + 0.5}
-                width={b.width * CELL_SIZE - 1}
-                height={b.length * CELL_SIZE - 1}
-                fill={isMatch ? '#ff0' : getBuildingColor(b.entry.type)}
-                opacity={dimmed ? 0.15 : isHovered ? 1 : isMatch ? 0.95 : 0.75}
-                stroke={isHovered ? '#fff' : isMatch ? '#ff0' : 'rgba(0,0,0,0.3)'}
-                strokeWidth={isHovered ? 2 : isMatch ? 1.5 : 0.5}
-                rx={1}
-                filter={isMatch ? 'url(#search-glow)' : undefined}
-                onMouseEnter={(e) => {
-                  setHoveredBuilding(b);
-                  setTooltipPos({ x: e.clientX, y: e.clientY });
-                }}
-                onMouseLeave={() => setHoveredBuilding(null)}
-                style={{ cursor: 'pointer' }}
-              />
+              <g key={b.entry.id}>
+                <rect
+                  x={b.x * CELL_SIZE + 0.5}
+                  y={b.y * CELL_SIZE + 0.5}
+                  width={b.width * CELL_SIZE - 1}
+                  height={b.length * CELL_SIZE - 1}
+                  fill={isMatch ? '#ff0' : getBuildingColor(b.entry.type)}
+                  opacity={dimmed ? 0.15 : isHovered ? 1 : isMatch ? 0.95 : 0.75}
+                  stroke={isHovered ? '#fff' : isMatch ? '#ff0' : 'rgba(0,0,0,0.3)'}
+                  strokeWidth={isHovered ? 2 : isMatch ? 1.5 : 0.5}
+                  rx={1}
+                  filter={isMatch ? 'url(#search-glow)' : undefined}
+                  onMouseEnter={(e) => {
+                    setHoveredBuilding(b);
+                    setTooltipPos({ x: e.clientX, y: e.clientY });
+                  }}
+                  onMouseLeave={() => setHoveredBuilding(null)}
+                  style={{ cursor: 'pointer' }}
+                />
+                {needsRoad && !dimmed && (
+                  <rect
+                    x={b.x * CELL_SIZE + 2}
+                    y={b.y * CELL_SIZE + 2}
+                    width={b.width * CELL_SIZE - 4}
+                    height={b.length * CELL_SIZE - 4}
+                    fill="none"
+                    stroke="rgba(255,255,255,0.6)"
+                    strokeWidth={0.8}
+                    rx={0.5}
+                    pointerEvents="none"
+                  />
+                )}
+              </g>
             );
           })}
         </svg>
