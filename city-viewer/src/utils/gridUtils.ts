@@ -71,7 +71,7 @@ export function getPlacedBuildings(data: CityData): PlacedBuilding[] {
 }
 
 export const BUILDING_COLORS: Record<string, string> = {
-  main_building: '#e6b800',
+  main_building: '#8B4513',
   greatbuilding: '#ffd700',
   generic_building: '#4a90d9',
   street: '#666666',
