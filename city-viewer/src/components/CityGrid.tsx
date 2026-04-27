@@ -161,12 +161,33 @@ export default function CityGrid() {
   const hasSearch = searchText.trim().length > 0;
 
   const roadConnectivity = useMemo(() => {
-    const streetByCell = new Map<string, number>();
-    const streetNeighbors = new Map<number, Set<number>>();
+    const streetByCellAny = new Map<string, number>();
+    const streetByCell2x2 = new Map<string, number>();
+    const streetNeighborsAny = new Map<number, Set<number>>();
+    const streetNeighbors2x2 = new Map<number, Set<number>>();
     const streetIds = new Set<number>();
-    const connectedStreetIds = new Set<number>();
-    const connectedBuildingIds = new Set<number>();
+    const street2x2Ids = new Set<number>();
+    const connectedStreetIdsAny = new Set<number>();
+    const connectedStreetIds2x2 = new Set<number>();
+    const connectedBuildingIdsAny = new Set<number>();
+    const connectedBuildingIds2x2 = new Set<number>();
     const mainBuilding = allBuildings.find(b => b.entry.type === 'main_building') ?? null;
+
+    const isTwoByTwoStreet = (building: PlacedBuilding): boolean => {
+      return building.entry.type === 'street' && building.width === 2 && building.length === 2;
+    };
+
+    const getRequiredStreetLevel = (building: PlacedBuilding): number => {
+      const entity = data?.CityEntities?.[building.entry.cityentity_id];
+      const rootLevel = entity?.requirements?.street_connection_level ?? 0;
+      let componentLevel = 0;
+      for (const comp of Object.values(entity?.components ?? {})) {
+        const level = (comp as { streetConnectionRequirement?: { requiredLevel?: number } })
+          ?.streetConnectionRequirement?.requiredLevel ?? 0;
+        if (level > componentLevel) componentLevel = level;
+      }
+      return Math.max(rootLevel, componentLevel);
+    };
 
     const getEdgeCells = (building: PlacedBuilding): string[] => {
       const edgeCells: string[] = [];
@@ -184,60 +205,113 @@ export default function CityGrid() {
     for (const building of allBuildings) {
       if (building.entry.type !== 'street') continue;
       streetIds.add(building.entry.id);
-      streetNeighbors.set(building.entry.id, new Set());
+      streetNeighborsAny.set(building.entry.id, new Set());
+      if (isTwoByTwoStreet(building)) {
+        street2x2Ids.add(building.entry.id);
+        streetNeighbors2x2.set(building.entry.id, new Set());
+      }
       for (let dx = 0; dx < building.width; dx++) {
         for (let dy = 0; dy < building.length; dy++) {
-          streetByCell.set(`${building.x + dx},${building.y + dy}`, building.entry.id);
+          const key = `${building.x + dx},${building.y + dy}`;
+          streetByCellAny.set(key, building.entry.id);
+          if (isTwoByTwoStreet(building)) {
+            streetByCell2x2.set(key, building.entry.id);
+          }
         }
       }
     }
 
     for (const building of allBuildings) {
       if (building.entry.type !== 'street') continue;
-      const neighbors = streetNeighbors.get(building.entry.id);
-      if (!neighbors) continue;
+      const neighborsAny = streetNeighborsAny.get(building.entry.id);
+      if (!neighborsAny) continue;
       for (const cell of getEdgeCells(building)) {
-        const neighborStreetId = streetByCell.get(cell);
-        if (neighborStreetId != null && neighborStreetId !== building.entry.id) {
-          neighbors.add(neighborStreetId);
+        const neighborAnyId = streetByCellAny.get(cell);
+        if (neighborAnyId != null && neighborAnyId !== building.entry.id) {
+          neighborsAny.add(neighborAnyId);
+        }
+
+        if (street2x2Ids.has(building.entry.id)) {
+          const neighbors2x2 = streetNeighbors2x2.get(building.entry.id);
+          const neighbor2x2Id = streetByCell2x2.get(cell);
+          if (neighbors2x2 && neighbor2x2Id != null && neighbor2x2Id !== building.entry.id) {
+            neighbors2x2.add(neighbor2x2Id);
+          }
         }
       }
     }
 
-    const queue: number[] = [];
+    const queueAny: number[] = [];
+    const queue2x2: number[] = [];
     if (mainBuilding) {
       for (const cell of getEdgeCells(mainBuilding)) {
-        const streetId = streetByCell.get(cell);
-        if (streetId != null && !connectedStreetIds.has(streetId)) {
-          connectedStreetIds.add(streetId);
-          queue.push(streetId);
+        const anyStreetId = streetByCellAny.get(cell);
+        if (anyStreetId != null && !connectedStreetIdsAny.has(anyStreetId)) {
+          connectedStreetIdsAny.add(anyStreetId);
+          queueAny.push(anyStreetId);
+        }
+
+        const street2x2Id = streetByCell2x2.get(cell);
+        if (street2x2Id != null && !connectedStreetIds2x2.has(street2x2Id)) {
+          connectedStreetIds2x2.add(street2x2Id);
+          queue2x2.push(street2x2Id);
         }
       }
     }
 
-    while (queue.length > 0) {
-      const streetId = queue.shift();
+    while (queueAny.length > 0) {
+      const streetId = queueAny.shift();
       if (streetId == null) continue;
-      for (const neighborStreetId of streetNeighbors.get(streetId) ?? []) {
-        if (connectedStreetIds.has(neighborStreetId)) continue;
-        connectedStreetIds.add(neighborStreetId);
-        queue.push(neighborStreetId);
+      for (const neighborStreetId of streetNeighborsAny.get(streetId) ?? []) {
+        if (connectedStreetIdsAny.has(neighborStreetId)) continue;
+        connectedStreetIdsAny.add(neighborStreetId);
+        queueAny.push(neighborStreetId);
+      }
+    }
+
+    while (queue2x2.length > 0) {
+      const streetId = queue2x2.shift();
+      if (streetId == null) continue;
+      for (const neighborStreetId of streetNeighbors2x2.get(streetId) ?? []) {
+        if (connectedStreetIds2x2.has(neighborStreetId)) continue;
+        connectedStreetIds2x2.add(neighborStreetId);
+        queue2x2.push(neighborStreetId);
       }
     }
 
     for (const building of allBuildings) {
       if (building.entry.type === 'street') continue;
+      const requiredStreetLevel = getRequiredStreetLevel(building);
       for (const cell of getEdgeCells(building)) {
-        const streetId = streetByCell.get(cell);
-        if (streetId != null && connectedStreetIds.has(streetId)) {
-          connectedBuildingIds.add(building.entry.id);
+        const anyStreetId = streetByCellAny.get(cell);
+        if (anyStreetId != null && connectedStreetIdsAny.has(anyStreetId)) {
+          connectedBuildingIdsAny.add(building.entry.id);
+        }
+
+        if (requiredStreetLevel >= 2) {
+          const street2x2Id = streetByCell2x2.get(cell);
+          if (street2x2Id != null && connectedStreetIds2x2.has(street2x2Id)) {
+            connectedBuildingIds2x2.add(building.entry.id);
+          }
+        }
+
+        if (requiredStreetLevel < 2 && connectedBuildingIdsAny.has(building.entry.id)) {
+          break;
+        }
+        if (requiredStreetLevel >= 2 && connectedBuildingIds2x2.has(building.entry.id)) {
           break;
         }
       }
     }
 
-    return { streetIds, connectedStreetIds, connectedBuildingIds };
-  }, [allBuildings]);
+    return {
+      streetIds,
+      connectedStreetIdsAny,
+      connectedStreetIds2x2,
+      connectedBuildingIdsAny,
+      connectedBuildingIds2x2,
+    };
+  }, [allBuildings, data]);
 
   // Filtered buildings
   const buildings = useMemo(() => {
@@ -526,18 +600,32 @@ export default function CityGrid() {
             const entity = data.CityEntities?.[b.entry.cityentity_id];
             const inherent = new Set(['street', 'main_building', 'tower', 'hub_main', 'hub_part', 'decoration']);
             const isStreet = b.entry.type === 'street';
+            const isTwoByTwoStreet = isStreet && b.width === 2 && b.length === 2;
+            const rootStreetLevel = entity?.requirements?.street_connection_level ?? 0;
+            const componentStreetLevel = (Object.values(entity?.components ?? []) as Array<{ streetConnectionRequirement?: { requiredLevel?: number } }>).reduce<number>((maxLevel, c) => {
+              const level = c.streetConnectionRequirement?.requiredLevel ?? 0;
+              return Math.max(maxLevel, level);
+            }, 0);
+            const requiredStreetLevel = Math.max(rootStreetLevel, componentStreetLevel);
             const needsRoad = !inherent.has(b.entry.type) && (
-              (entity?.requirements?.street_connection_level ?? 0) > 0 ||
-              Object.values(entity?.components ?? {}).some(
-                (c: any) => (c?.streetConnectionRequirement?.requiredLevel ?? 0) > 0
-              )
+              requiredStreetLevel > 0
             );
-            const hasConnectedRoadPath = roadConnectivity.connectedBuildingIds.has(b.entry.id);
+            const requires2x2RoadPath = requiredStreetLevel >= 2;
+            const hasConnectedRoadPath = requires2x2RoadPath
+              ? roadConnectivity.connectedBuildingIds2x2.has(b.entry.id)
+              : roadConnectivity.connectedBuildingIdsAny.has(b.entry.id);
+            const hasAnyConnectedRoadPath = roadConnectivity.connectedBuildingIdsAny.has(b.entry.id);
             const disconnected = needsRoad && !hasConnectedRoadPath;
-            const wastedRoad = !needsRoad && hasConnectedRoadPath && !inherent.has(b.entry.type);
-            const orphanRoad = isStreet && !roadConnectivity.connectedStreetIds.has(b.entry.id);
+            const wastedRoad = !needsRoad && hasAnyConnectedRoadPath && !inherent.has(b.entry.type);
+            const orphanRoad = isStreet && !roadConnectivity.connectedStreetIdsAny.has(b.entry.id);
             const showBorder = (needsRoad || wastedRoad || orphanRoad) && !dimmed;
             const isRed = disconnected || wastedRoad || orphanRoad;
+            const fillColor = isStreet
+              ? (isTwoByTwoStreet ? '#7b7b7b' : '#616161')
+              : getBuildingColor(b.entry.type);
+            const innerBorderWidth = requires2x2RoadPath
+              ? (isRed ? 2.2 : 1.4)
+              : (isRed ? 1.5 : 0.8);
 
             return (
               <g key={b.entry.id}>
@@ -546,7 +634,7 @@ export default function CityGrid() {
                   y={b.y * CELL_SIZE + 0.5}
                   width={b.width * CELL_SIZE - 1}
                   height={b.length * CELL_SIZE - 1}
-                  fill={isMatch ? '#ff0' : getBuildingColor(b.entry.type)}
+                  fill={isMatch ? '#ff0' : fillColor}
                   opacity={dimmed ? 0.15 : isHovered ? 1 : isMatch ? 0.95 : 0.75}
                   stroke={isHovered ? '#fff' : isMatch ? '#ff0' : 'rgba(0,0,0,0.3)'}
                   strokeWidth={isHovered ? 2 : isMatch ? 1.5 : 0.5}
@@ -567,7 +655,7 @@ export default function CityGrid() {
                     height={b.length * CELL_SIZE - 4}
                     fill="none"
                     stroke={isRed ? 'rgba(255,0,0,0.9)' : 'rgba(255,255,255,0.6)'}
-                    strokeWidth={isRed ? 1.5 : 0.8}
+                    strokeWidth={innerBorderWidth}
                     rx={0.5}
                     pointerEvents="none"
                   />
