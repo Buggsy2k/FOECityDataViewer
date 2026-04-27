@@ -23,3 +23,9 @@ The dev server starts at **http://localhost:5173**. Open it in your browser, the
 | `npm run dev` | Start the Vite dev server with hot module replacement |
 | `npm run build` | Type-check with TypeScript and build for production |
 | `npm run preview` | Serve the production build locally for testing |
+
+## Promote To Server
+
+```bash
+cd /volume1/web/FOECityData
+```
