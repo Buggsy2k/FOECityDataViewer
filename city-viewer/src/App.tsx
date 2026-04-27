@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback, useRef } from 'react';
 import { useCityData } from './context/CityDataContext';
 import DataLoader from './components/DataLoader';
 import ProductionSummary from './components/ProductionSummary';
@@ -7,6 +7,7 @@ import CityGrid from './components/CityGrid';
 import GreatBuildings from './components/GreatBuildings';
 import MilitaryTable from './components/MilitaryTable';
 import { aggregateProduction, formatNumber } from './utils/dataProcessing';
+import type { CityData } from './types/citydata';
 import './App.css';
 
 type Tab = 'production' | 'buildings' | 'military' | 'grid' | 'greatbuildings';
@@ -14,6 +15,19 @@ type Tab = 'production' | 'buildings' | 'military' | 'grid' | 'greatbuildings';
 function AppContent() {
   const { data, setData } = useCityData();
   const [activeTab, setActiveTab] = useState<Tab>('production');
+  const [dragOver, setDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const loadFile = useCallback((file: File) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const json = JSON.parse(reader.result as string) as CityData;
+        if (json.CityMapData) setData(json);
+      } catch { /* ignore bad file */ }
+    };
+    reader.readAsText(file);
+  }, [setData]);
 
   const stats = useMemo(() => {
     if (!data) return null;
@@ -49,7 +63,23 @@ function AppContent() {
             </>
           )}
         </div>
-        <button className="reset-btn" onClick={() => setData(null)}>Load New File</button>
+        <div
+          className={`reset-drop-zone ${dragOver ? 'drag-over' : ''}`}
+          onDrop={e => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files[0]; if (f) loadFile(f); }}
+          onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+          onDragLeave={() => setDragOver(false)}
+        >
+          <button className="reset-btn" onClick={() => fileInputRef.current?.click()}>
+            📂 Load New File
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".json"
+            hidden
+            onChange={e => { const f = e.target.files?.[0]; if (f) loadFile(f); e.target.value = ''; }}
+          />
+        </div>
       </header>
 
       <nav className="tab-nav">

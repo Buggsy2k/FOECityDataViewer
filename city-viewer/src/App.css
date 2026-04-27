@@ -155,6 +155,16 @@ body {
   color: var(--gold);
 }
 
+.reset-drop-zone {
+  display: inline-block;
+}
+
+.reset-drop-zone.drag-over .reset-btn {
+  border-color: var(--gold);
+  color: var(--gold);
+  background: rgba(255, 215, 0, 0.1);
+}
+
 .reset-btn {
   padding: 0.4rem 1rem;
   background: transparent;
