@@ -160,42 +160,84 @@ export default function CityGrid() {
 
   const hasSearch = searchText.trim().length > 0;
 
-  // Precompute set of grid cells occupied by streets for geometric road adjacency
-  const streetCells = useMemo(() => {
-    const cells = new Set<string>();
-    for (const b of allBuildings) {
-      if (b.entry.type !== 'street') continue;
-      for (let dx = 0; dx < b.width; dx++) {
-        for (let dy = 0; dy < b.length; dy++) {
-          cells.add(`${b.x + dx},${b.y + dy}`);
-        }
-      }
-    }
-    return cells;
-  }, [allBuildings]);
+  const roadConnectivity = useMemo(() => {
+    const streetByCell = new Map<string, number>();
+    const streetNeighbors = new Map<number, Set<number>>();
+    const streetIds = new Set<number>();
+    const connectedStreetIds = new Set<number>();
+    const connectedBuildingIds = new Set<number>();
+    const mainBuilding = allBuildings.find(b => b.entry.type === 'main_building') ?? null;
 
-  // Precompute which buildings physically touch a street (share an edge)
-  const touchesRoadSet = useMemo(() => {
-    const result = new Set<number>();
-    for (const b of allBuildings) {
-      if (b.entry.type === 'street') continue;
-      let found = false;
-      // Check all edge cells around the building perimeter
-      for (let dx = -1; dx <= b.width && !found; dx++) {
-        for (let dy = -1; dy <= b.length && !found; dy++) {
-          // Only check cells on the border (not interior and not corners-only)
-          const onEdge = dx === -1 || dx === b.width || dy === -1 || dy === b.length;
-          const isCorner = (dx === -1 || dx === b.width) && (dy === -1 || dy === b.length);
+    const getEdgeCells = (building: PlacedBuilding): string[] => {
+      const edgeCells: string[] = [];
+      for (let dx = -1; dx <= building.width; dx++) {
+        for (let dy = -1; dy <= building.length; dy++) {
+          const onEdge = dx === -1 || dx === building.width || dy === -1 || dy === building.length;
+          const isCorner = (dx === -1 || dx === building.width) && (dy === -1 || dy === building.length);
           if (!onEdge || isCorner) continue;
-          if (streetCells.has(`${b.x + dx},${b.y + dy}`)) {
-            found = true;
-          }
+          edgeCells.push(`${building.x + dx},${building.y + dy}`);
         }
       }
-      if (found) result.add(b.entry.id);
+      return edgeCells;
+    };
+
+    for (const building of allBuildings) {
+      if (building.entry.type !== 'street') continue;
+      streetIds.add(building.entry.id);
+      streetNeighbors.set(building.entry.id, new Set());
+      for (let dx = 0; dx < building.width; dx++) {
+        for (let dy = 0; dy < building.length; dy++) {
+          streetByCell.set(`${building.x + dx},${building.y + dy}`, building.entry.id);
+        }
+      }
     }
-    return result;
-  }, [allBuildings, streetCells]);
+
+    for (const building of allBuildings) {
+      if (building.entry.type !== 'street') continue;
+      const neighbors = streetNeighbors.get(building.entry.id);
+      if (!neighbors) continue;
+      for (const cell of getEdgeCells(building)) {
+        const neighborStreetId = streetByCell.get(cell);
+        if (neighborStreetId != null && neighborStreetId !== building.entry.id) {
+          neighbors.add(neighborStreetId);
+        }
+      }
+    }
+
+    const queue: number[] = [];
+    if (mainBuilding) {
+      for (const cell of getEdgeCells(mainBuilding)) {
+        const streetId = streetByCell.get(cell);
+        if (streetId != null && !connectedStreetIds.has(streetId)) {
+          connectedStreetIds.add(streetId);
+          queue.push(streetId);
+        }
+      }
+    }
+
+    while (queue.length > 0) {
+      const streetId = queue.shift();
+      if (streetId == null) continue;
+      for (const neighborStreetId of streetNeighbors.get(streetId) ?? []) {
+        if (connectedStreetIds.has(neighborStreetId)) continue;
+        connectedStreetIds.add(neighborStreetId);
+        queue.push(neighborStreetId);
+      }
+    }
+
+    for (const building of allBuildings) {
+      if (building.entry.type === 'street') continue;
+      for (const cell of getEdgeCells(building)) {
+        const streetId = streetByCell.get(cell);
+        if (streetId != null && connectedStreetIds.has(streetId)) {
+          connectedBuildingIds.add(building.entry.id);
+          break;
+        }
+      }
+    }
+
+    return { streetIds, connectedStreetIds, connectedBuildingIds };
+  }, [allBuildings]);
 
   // Filtered buildings
   const buildings = useMemo(() => {
@@ -483,17 +525,19 @@ export default function CityGrid() {
             const dimmed = hasSearch && !isMatch && !isHovered;
             const entity = data.CityEntities?.[b.entry.cityentity_id];
             const inherent = new Set(['street', 'main_building', 'tower', 'hub_main', 'hub_part', 'decoration']);
+            const isStreet = b.entry.type === 'street';
             const needsRoad = !inherent.has(b.entry.type) && (
               (entity?.requirements?.street_connection_level ?? 0) > 0 ||
               Object.values(entity?.components ?? {}).some(
                 (c: any) => (c?.streetConnectionRequirement?.requiredLevel ?? 0) > 0
               )
             );
-            const touchesRoad = touchesRoadSet.has(b.entry.id);
-            const disconnected = needsRoad && !touchesRoad;
-            const wastedRoad = !needsRoad && touchesRoad && !inherent.has(b.entry.type);
-            const showBorder = (needsRoad || wastedRoad) && !dimmed;
-            const isRed = disconnected || wastedRoad;
+            const hasConnectedRoadPath = roadConnectivity.connectedBuildingIds.has(b.entry.id);
+            const disconnected = needsRoad && !hasConnectedRoadPath;
+            const wastedRoad = !needsRoad && hasConnectedRoadPath && !inherent.has(b.entry.type);
+            const orphanRoad = isStreet && !roadConnectivity.connectedStreetIds.has(b.entry.id);
+            const showBorder = (needsRoad || wastedRoad || orphanRoad) && !dimmed;
+            const isRed = disconnected || wastedRoad || orphanRoad;
 
             return (
               <g key={b.entry.id}>
