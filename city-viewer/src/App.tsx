@@ -90,7 +90,6 @@ function AppContent() {
           ['military', '⚔️ Military Units'],
           ['grid', '🗺️ Grid Map'],
           ['greatbuildings', '🏛️ Great Buildings'],
-          ['optimizer', '🧠 Layout Optimizer'],
         ] as [Tab, string][]).map(([key, label]) => (
           <button
             key={key}
