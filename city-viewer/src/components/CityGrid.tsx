@@ -2,6 +2,7 @@ import { useMemo, useState, useCallback, useRef, useEffect } from 'react';
 import { useCityData } from '../context/CityDataContext';
 import { getGridBounds, getPlacedBuildings, getBuildingColor, getStreetEra, type PlacedBuilding } from '../utils/gridUtils';
 import { resolveBuildingName, formatResourceName, getBuildingProduction, formatNumber, ERA_ORDER } from '../utils/dataProcessing';
+import { buildCurrentLayoutReport, downloadTextFile, copyTextToClipboard } from '../utils/layoutExport';
 
 const CELL_SIZE = 12;
 
@@ -159,6 +160,18 @@ export default function CityGrid() {
   }, [searchText, nameMap]);
 
   const hasSearch = searchText.trim().length > 0;
+
+  const getRequiredStreetLevelFor = useCallback((b: PlacedBuilding): number => {
+    const entity = data?.CityEntities?.[b.entry.cityentity_id];
+    const root = entity?.requirements?.street_connection_level ?? 0;
+    let comp = 0;
+    for (const c of Object.values(entity?.components ?? {})) {
+      const lvl = (c as { streetConnectionRequirement?: { requiredLevel?: number } })
+        ?.streetConnectionRequirement?.requiredLevel ?? 0;
+      if (lvl > comp) comp = lvl;
+    }
+    return Math.max(root, comp);
+  }, [data]);
 
   const roadConnectivity = useMemo(() => {
     const streetByCellAny = new Map<string, number>();
@@ -425,6 +438,78 @@ export default function CityGrid() {
     });
   };
 
+  const gridStats = useMemo(() => {
+    if (!data || !bounds) return null;
+    let availableCells = 0;
+    for (const a of data.UnlockedAreas) availableCells += a.width * a.length;
+
+    let buildingCells = 0;
+    let roadCells = 0;
+    let road1Count = 0;
+    let road2Count = 0;
+    let needs2Count = 0;
+    let needs1Count = 0;
+    let noRoadCount = 0;
+    let disconnectedCount = 0;
+    let wastedRoadCount = 0;
+    let orphanRoadCount = 0;
+    const inherent = new Set(['street', 'main_building', 'tower', 'hub_main', 'hub_part', 'decoration']);
+    const typeCounts = new Map<string, number>();
+
+    for (const b of allBuildings) {
+      const cells = b.width * b.length;
+      if (b.entry.type === 'street') {
+        roadCells += cells;
+        if (b.width === 2 && b.length === 2) road2Count++;
+        else if (b.width === 1 && b.length === 1) road1Count++;
+        if (!roadConnectivity.connectedStreetIdsAny.has(b.entry.id)) orphanRoadCount++;
+      } else {
+        buildingCells += cells;
+        typeCounts.set(b.entry.type, (typeCounts.get(b.entry.type) ?? 0) + 1);
+        const lvl = getRequiredStreetLevelFor(b);
+        const needsRoad = !inherent.has(b.entry.type) && lvl > 0;
+        if (lvl >= 2) needs2Count++;
+        else if (lvl === 1) needs1Count++;
+        else if (b.entry.type !== 'main_building') noRoadCount++;
+        if (needsRoad) {
+          const ok = lvl >= 2
+            ? roadConnectivity.connectedBuildingIds2x2.has(b.entry.id)
+            : roadConnectivity.connectedBuildingIdsAny.has(b.entry.id);
+          if (!ok) disconnectedCount++;
+        } else if (!inherent.has(b.entry.type)) {
+          if (roadConnectivity.connectedBuildingIdsAny.has(b.entry.id)) wastedRoadCount++;
+        }
+      }
+    }
+
+    const emptyCells = Math.max(0, availableCells - buildingCells - roadCells);
+    const buildingsTotal = needs2Count + needs1Count + noRoadCount; // excludes main_building
+    const topTypes = [...typeCounts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 8);
+
+    return {
+      availableCells,
+      buildingCells,
+      roadCells,
+      emptyCells,
+      road1Count,
+      road2Count,
+      roadEntities: road1Count + road2Count,
+      needs2Count,
+      needs1Count,
+      noRoadCount,
+      buildingsTotal,
+      disconnectedCount,
+      wastedRoadCount,
+      orphanRoadCount,
+      topTypes,
+      areaCount: data.UnlockedAreas.length,
+      gridWidth: bounds.width,
+      gridHeight: bounds.height,
+    };
+  }, [data, bounds, allBuildings, roadConnectivity, getRequiredStreetLevelFor]);
+
   if (!data || !bounds || !viewBox) return null;
 
   return (
@@ -541,9 +626,36 @@ export default function CityGrid() {
               </span>
             )}
           </div>
+          <div className="grid-export">
+            <button
+              className="grid-dropdown-btn"
+              title="Download a text+JSON layout report (current city)"
+              onClick={() => {
+                if (!data || !bounds) return;
+                const r = buildCurrentLayoutReport(data, bounds);
+                downloadTextFile('city-layout-current.txt', r.text, 'text/plain');
+                downloadTextFile('city-layout-current.json', r.json, 'application/json');
+              }}
+            >
+              Export Layout
+            </button>
+            <button
+              className="grid-dropdown-btn"
+              title="Copy the layout report (text + JSON) to the clipboard"
+              onClick={async () => {
+                if (!data || !bounds) return;
+                const r = buildCurrentLayoutReport(data, bounds);
+                const ok = await copyTextToClipboard(r.text);
+                if (!ok) downloadTextFile('city-layout-current.txt', r.text, 'text/plain');
+              }}
+            >
+              Copy Layout
+            </button>
+          </div>
         </div>
       </div>
 
+      <div className="grid-body">
       <div
         className="grid-wrapper"
         ref={wrapperCallbackRef}
@@ -660,6 +772,58 @@ export default function CityGrid() {
                     pointerEvents="none"
                   />
                 )}
+                {!isStreet && !dimmed && (() => {
+                  const pxPad = 1.5;
+                  const wPx = b.width * CELL_SIZE - 1;
+                  const hPx = b.length * CELL_SIZE - 1;
+                  const rotated = b.length > b.width;
+                  // After rotation the inner content's effective box is hPx x wPx.
+                  const innerW = rotated ? hPx : wPx;
+                  const innerH = rotated ? wPx : hPx;
+                  const name = resolveBuildingName(b.entry.cityentity_id, data);
+                  return (
+                    <foreignObject
+                      x={b.x * CELL_SIZE + 0.5}
+                      y={b.y * CELL_SIZE + 0.5}
+                      width={wPx}
+                      height={hPx}
+                      pointerEvents="none"
+                    >
+                      <div
+                        // @ts-expect-error xmlns is valid on HTML inside foreignObject
+                        xmlns="http://www.w3.org/1999/xhtml"
+                        style={{
+                          width: `${innerW}px`,
+                          height: `${innerH}px`,
+                          transform: rotated
+                            ? `translate(${wPx}px, 0) rotate(90deg)`
+                            : undefined,
+                          transformOrigin: '0 0',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          textAlign: 'center',
+                          padding: `${pxPad}px`,
+                          boxSizing: 'border-box',
+                          overflow: 'hidden',
+                          fontFamily: '"Segoe UI", "Helvetica Neue", Arial, sans-serif',
+                          fontSize: '4px',
+                          lineHeight: 1,
+                          color: '#fff',
+                          textShadow: '0 0 1px rgba(0,0,0,0.95), 0 0 1px rgba(0,0,0,0.95)',
+                          fontWeight: 300,
+                          fontStretch: 'condensed',
+                          letterSpacing: '-0.05px',
+                          wordBreak: 'break-word',
+                          overflowWrap: 'anywhere',
+                          hyphens: 'auto',
+                        }}
+                      >
+                        {name}
+                      </div>
+                    </foreignObject>
+                  );
+                })()}
               </g>
             );
           })}
@@ -682,6 +846,60 @@ export default function CityGrid() {
             )}
             <TooltipProduction entry={hoveredBuilding.entry} />
           </div>
+        )}
+      </div>
+        {gridStats && (
+          <aside className="grid-stats">
+            <h3>City Statistics</h3>
+
+            <div className="grid-stats-section">
+              <div className="grid-stats-section-title">Layout</div>
+              <div className="grid-stats-row"><span>Grid extent</span><b>{gridStats.gridWidth} × {gridStats.gridHeight}</b></div>
+              <div className="grid-stats-row"><span>Unlocked areas</span><b>{gridStats.areaCount}</b></div>
+              <div className="grid-stats-row"><span>Available cells</span><b>{gridStats.availableCells.toLocaleString()}</b></div>
+              <div className="grid-stats-row"><span>Building cells</span><b>{gridStats.buildingCells.toLocaleString()}</b></div>
+              <div className="grid-stats-row"><span>Road cells</span><b>{gridStats.roadCells.toLocaleString()}</b></div>
+              <div className="grid-stats-row"><span>Empty cells</span><b>{gridStats.emptyCells.toLocaleString()}</b></div>
+            </div>
+
+            <div className="grid-stats-section">
+              <div className="grid-stats-section-title">Roads</div>
+              <div className="grid-stats-row"><span><i className="swatch road1" /> 1×1 road tiles</span><b>{gridStats.road1Count}</b></div>
+              <div className="grid-stats-row"><span><i className="swatch road2" /> 2×2 road tiles</span><b>{gridStats.road2Count}</b></div>
+              <div className="grid-stats-row"><span>Total road entities</span><b>{gridStats.roadEntities}</b></div>
+              <div className="grid-stats-row"><span>Orphan roads (no path to TH)</span>
+                <b className={gridStats.orphanRoadCount > 0 ? 'bad' : ''}>{gridStats.orphanRoadCount}</b>
+              </div>
+            </div>
+
+            <div className="grid-stats-section">
+              <div className="grid-stats-section-title">Buildings ({gridStats.buildingsTotal})</div>
+              <div className="grid-stats-row"><span>Need 2×2 road</span><b>{gridStats.needs2Count}</b></div>
+              <div className="grid-stats-row"><span>Need 1×1 road</span><b>{gridStats.needs1Count}</b></div>
+              <div className="grid-stats-row"><span>No road needed</span><b>{gridStats.noRoadCount}</b></div>
+              <div className="grid-stats-row"><span>Disconnected (no road served)</span>
+                <b className={gridStats.disconnectedCount > 0 ? 'bad' : ''}>{gridStats.disconnectedCount}</b>
+              </div>
+              <div className="grid-stats-row"><span>Wasted road (no road needed)</span>
+                <b className={gridStats.wastedRoadCount > 0 ? 'warn' : ''}>{gridStats.wastedRoadCount}</b>
+              </div>
+            </div>
+
+            {gridStats.topTypes.length > 0 && (
+              <div className="grid-stats-section">
+                <div className="grid-stats-section-title">By type</div>
+                {gridStats.topTypes.map(([type, count]) => (
+                  <div key={type} className="grid-stats-row">
+                    <span>
+                      <i className="legend-color" style={{ background: getBuildingColor(type) }} />
+                      {TYPE_LABELS[type] ?? type.replace(/_/g, ' ')}
+                    </span>
+                    <b>{count}</b>
+                  </div>
+                ))}
+              </div>
+            )}
+          </aside>
         )}
       </div>
       <p className="grid-hint">Scroll to zoom, drag to pan</p>

@@ -6,11 +6,12 @@ import BuildingTable from './components/BuildingTable';
 import CityGrid from './components/CityGrid';
 import GreatBuildings from './components/GreatBuildings';
 import MilitaryTable from './components/MilitaryTable';
+import LayoutOptimizer from './components/LayoutOptimizer';
 import { aggregateProduction, formatNumber } from './utils/dataProcessing';
 import type { CityData } from './types/citydata';
 import './App.css';
 
-type Tab = 'production' | 'buildings' | 'military' | 'grid' | 'greatbuildings';
+type Tab = 'production' | 'buildings' | 'military' | 'grid' | 'greatbuildings' | 'optimizer';
 
 function AppContent() {
   const { data, setData } = useCityData();
@@ -89,6 +90,7 @@ function AppContent() {
           ['military', '⚔️ Military Units'],
           ['grid', '🗺️ Grid Map'],
           ['greatbuildings', '🏛️ Great Buildings'],
+          ['optimizer', '🧠 Layout Optimizer'],
         ] as [Tab, string][]).map(([key, label]) => (
           <button
             key={key}
@@ -106,6 +108,7 @@ function AppContent() {
         {activeTab === 'military' && <MilitaryTable />}
         {activeTab === 'grid' && <CityGrid />}
         {activeTab === 'greatbuildings' && <GreatBuildings />}
+        {activeTab === 'optimizer' && <LayoutOptimizer />}
       </main>
     </div>
   );
