@@ -899,10 +899,10 @@ export default function CityGrid() {
                 ))}
               </div>
             )}
+            <p className="grid-hint">Scroll to zoom, drag to pan</p>
           </aside>
         )}
       </div>
-      <p className="grid-hint">Scroll to zoom, drag to pan</p>
     </div>
   );
 }

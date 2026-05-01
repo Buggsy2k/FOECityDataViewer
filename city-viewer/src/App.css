@@ -428,7 +428,9 @@ body {
 .main-content {
   flex: 1;
   padding: 1.5rem;
-  overflow-y: auto;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 /* ===== Production Summary ===== */
@@ -943,6 +945,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+  height: 100%;
 }
 
 .city-grid-container h2 {
@@ -982,7 +985,9 @@ body {
 .city-svg {
   display: block;
   width: 100%;
-  height: 75vh;
+  height: 100%;
+  flex: 1;
+  min-height: 400px;
 }
 
 .grid-wrapper {
@@ -991,6 +996,9 @@ body {
   border-radius: 8px;
   overflow: hidden;
   cursor: grab;
+  flex: 1;
+  display: flex;
+  min-height: 0;
 }
 
 .grid-wrapper:active {
@@ -1002,6 +1010,8 @@ body {
   grid-template-columns: minmax(0, 1fr) minmax(240px, 300px);
   gap: 1rem;
   align-items: start;
+  flex: 1;
+  min-height: 0;
 }
 
 .grid-stats {
@@ -1013,6 +1023,8 @@ body {
   color: var(--text-secondary);
   max-height: 75vh;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
 }
 
 .grid-stats h3 {
@@ -1104,7 +1116,10 @@ body {
   text-align: center;
   font-size: 0.75rem;
   color: var(--text-muted);
-  margin: 0;
+  margin: 0.5rem 0 0;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+  margin-top: auto;
 }
 
 /* Grid toolbar: filter dropdowns + search */
