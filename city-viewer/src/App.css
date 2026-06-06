@@ -995,6 +995,7 @@ body {
   border: 1px solid var(--border);
   border-radius: 8px;
   overflow: hidden;
+  overscroll-behavior: contain;
   cursor: grab;
   flex: 1;
   display: flex;
@@ -1260,6 +1261,264 @@ body {
 
 .grid-dropdown-item input[type="checkbox"] {
   accent-color: var(--accent);
+}
+
+/* ===== City Designer ===== */
+.city-designer-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  height: 100%;
+  min-height: 0;
+}
+
+.city-designer-body {
+  display: grid;
+  grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
+  gap: 1rem;
+  flex: 1;
+  min-height: 0;
+}
+
+.designer-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overscroll-behavior: contain;
+}
+
+.designer-panel.drop-ready {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(74, 144, 217, 0.45) inset;
+}
+
+.designer-panel h3 {
+  margin: 0;
+}
+
+.designer-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.designer-sort-btn {
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  border-radius: 6px;
+  padding: 0.25rem 0.55rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.designer-sort-btn:hover {
+  border-color: var(--text-secondary);
+  color: var(--text-primary);
+}
+
+.designer-sort-btn.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(74, 144, 217, 0.12);
+}
+
+.designer-panel p {
+  margin: 0.4rem 0 0.7rem;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.designer-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.45rem;
+  margin-bottom: 0.65rem;
+}
+
+.designer-metrics div {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  padding: 0.3rem 0.4rem;
+  text-align: center;
+}
+
+.designer-metrics strong {
+  color: var(--text-primary);
+}
+
+.designer-list {
+  overflow: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-height: 0;
+  padding-right: 0.15rem;
+  max-height: 36vh;
+}
+
+.designer-item {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  gap: 0.45rem;
+  align-items: center;
+  text-align: left;
+  padding: 0.35rem 0.45rem;
+  cursor: grab;
+}
+
+.designer-item:hover {
+  border-color: var(--text-secondary);
+}
+
+.designer-item.parked {
+  border-color: rgba(74, 144, 217, 0.55);
+  background: rgba(74, 144, 217, 0.12);
+}
+
+.designer-item-name {
+  font-size: 0.8rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.designer-item-meta {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  grid-column: 2 / span 2;
+}
+
+.designer-item-color {
+  width: 10px;
+  height: 28px;
+  border-radius: 3px;
+  grid-row: 1 / span 2;
+}
+
+.designer-item-count {
+  font-size: 0.7rem;
+  color: var(--accent);
+  border: 1px solid rgba(74, 144, 217, 0.45);
+  background: rgba(74, 144, 217, 0.12);
+  border-radius: 999px;
+  padding: 0.1rem 0.4rem;
+  white-space: nowrap;
+}
+
+.designer-empty {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  padding: 0.65rem;
+  text-align: center;
+}
+
+.designer-versions {
+  margin-top: 0.7rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.65rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  min-height: 0;
+}
+
+.designer-versions-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.designer-versions-header h4 {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.designer-versions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  overflow: auto;
+  overscroll-behavior: contain;
+  max-height: 28vh;
+}
+
+.designer-version-item {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  padding: 0.35rem 0.45rem;
+}
+
+.designer-version-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  margin-bottom: 0.3rem;
+}
+
+.designer-version-meta strong {
+  font-size: 0.8rem;
+  color: var(--text-primary);
+}
+
+.designer-version-meta span {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+}
+
+.designer-version-actions {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.designer-mini-btn {
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  border-radius: 5px;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.designer-mini-btn:hover {
+  border-color: var(--text-secondary);
+}
+
+.designer-mini-btn.danger {
+  color: #f0b6b1;
+  border-color: rgba(231, 76, 60, 0.6);
+}
+
+@media (max-width: 1100px) {
+  .city-designer-body {
+    grid-template-columns: 1fr;
+  }
+
+  .designer-panel {
+    max-height: 260px;
+  }
 }
 
 /* ===== Great Buildings ===== */

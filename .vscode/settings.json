@@ -2,6 +2,7 @@
     "chat.tools.terminal.autoApprove": {
         "npm install": true,
         "ConvertFrom-Json": true,
-        "Group-Object": true
+        "Group-Object": true,
+        "npm run build": true
     }
 }

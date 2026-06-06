@@ -4,6 +4,7 @@ import DataLoader from './components/DataLoader';
 import ProductionSummary from './components/ProductionSummary';
 import BuildingTable from './components/BuildingTable';
 import CityGrid from './components/CityGrid';
+import CityDesigner from './components/CityDesigner';
 import GreatBuildings from './components/GreatBuildings';
 import MilitaryTable from './components/MilitaryTable';
 import LayoutOptimizer from './components/LayoutOptimizer';
@@ -11,7 +12,7 @@ import { aggregateProduction, formatNumber } from './utils/dataProcessing';
 import type { CityData } from './types/citydata';
 import './App.css';
 
-type Tab = 'production' | 'buildings' | 'military' | 'grid' | 'greatbuildings' | 'optimizer';
+type Tab = 'production' | 'buildings' | 'military' | 'grid' | 'designer' | 'greatbuildings' | 'optimizer';
 
 function AppContent() {
   const { data, setData } = useCityData();
@@ -89,6 +90,7 @@ function AppContent() {
           ['buildings', '🏠 Buildings'],
           ['military', '⚔️ Military Units'],
           ['grid', '🗺️ Grid Map'],
+          ['designer', '🧩 City Designer'],
           ['greatbuildings', '🏛️ Great Buildings'],
         ] as [Tab, string][]).map(([key, label]) => (
           <button
@@ -106,6 +108,7 @@ function AppContent() {
         {activeTab === 'buildings' && <BuildingTable />}
         {activeTab === 'military' && <MilitaryTable />}
         {activeTab === 'grid' && <CityGrid />}
+        {activeTab === 'designer' && <CityDesigner />}
         {activeTab === 'greatbuildings' && <GreatBuildings />}
         {activeTab === 'optimizer' && <LayoutOptimizer />}
       </main>
