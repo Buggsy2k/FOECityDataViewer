@@ -7,6 +7,7 @@ const CELL_SIZE = 12;
 
 type RoadNeed = 'none' | 'road1' | 'road2';
 type ParkedSortMode = 'name' | 'era' | 'size';
+type SortDirection = 'asc' | 'desc';
 
 interface DesignerBuilding extends PlacedBuilding {
   sizeKey: string;
@@ -104,6 +105,8 @@ export default function CityDesigner() {
   const [isPanning, setIsPanning] = useState(false);
   const [dragState, setDragState] = useState<DragState | null>(null);
   const panStart = useRef({ x: 0, y: 0, vx: 0, vy: 0 });
+  const isCtrlPanningRef = useRef(false);
+  const suppressDropOnMouseUpRef = useRef(false);
 
   const [positions, setPositions] = useState<Map<number, { x: number; y: number }>>(new Map());
   const [parkedIds, setParkedIds] = useState<Set<number>>(new Set());
@@ -113,6 +116,7 @@ export default function CityDesigner() {
   const [hiddenRoadNeeds, setHiddenRoadNeeds] = useState<Set<RoadNeed>>(new Set());
   const [searchText, setSearchText] = useState('');
   const [parkedSortMode, setParkedSortMode] = useState<ParkedSortMode>('name');
+  const [parkedSortDirection, setParkedSortDirection] = useState<SortDirection>('asc');
   const [savedLayouts, setSavedLayouts] = useState<SavedLayout[]>(() => {
     try {
       const raw = localStorage.getItem(LAYOUT_STORAGE_KEY);
@@ -381,6 +385,13 @@ export default function CityDesigner() {
     };
 
     const onMouseUp = () => {
+      if (suppressDropOnMouseUpRef.current || isCtrlPanningRef.current) {
+        suppressDropOnMouseUpRef.current = false;
+        isCtrlPanningRef.current = false;
+        setIsPanning(false);
+        return;
+      }
+
       // ── Street tool (staged roads): click-to-start, click-to-commit line ──
       if (dragState.isStreet && dragState.originParked) {
         if (dragState.overPanel) {
@@ -480,6 +491,13 @@ export default function CityDesigner() {
       const isOutside = dragState.candidate ? checkOutsideBounds(dragState.id, dragState.candidate.x, dragState.candidate.y) : true;
       const dropValid = dragState.candidate && dragState.valid && !isOutside;
       const dropOnPanel = dragState.overPanel;
+
+      // For staged placement mode, invalid clicks should keep the current drag active
+      // so the user can keep searching for a valid spot. Exit with Esc.
+      if (dragState.originParked && !dropValid) {
+        setIsPanning(false);
+        return;
+      }
 
       if (dropValid) {
         // ── Valid drop on map ──
@@ -624,7 +642,7 @@ export default function CityDesigner() {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
-      if (!dragState?.isStreet || !dragState.originParked) return;
+      if (!dragState?.originParked) return;
       e.preventDefault();
       setDragState(null);
       setIsPanning(false);
@@ -663,6 +681,7 @@ export default function CityDesigner() {
   }, []);
 
   const startDrag = useCallback((e: React.MouseEvent, buildingId: number) => {
+    if (dragState) return;
     e.preventDefault();
     e.stopPropagation();
     const source = buildingById.get(buildingId);
@@ -701,10 +720,28 @@ export default function CityDesigner() {
       lineCells: null,
       lineIds,
     });
-  }, [buildingById, positions, parkedIds, allBuildings]);
+  }, [buildingById, positions, parkedIds, allBuildings, dragState]);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    if (dragState || e.button !== 0) return;
+    if (e.button !== 0) return;
+
+    if (e.ctrlKey) {
+      isCtrlPanningRef.current = true;
+      suppressDropOnMouseUpRef.current = true;
+      setIsPanning(true);
+      setViewBox(prev => {
+        panStart.current = {
+          x: e.clientX,
+          y: e.clientY,
+          vx: prev?.x ?? 0,
+          vy: prev?.y ?? 0,
+        };
+        return prev;
+      });
+      return;
+    }
+
+    if (dragState) return;
     setIsPanning(true);
     setViewBox(prev => {
       panStart.current = {
@@ -718,7 +755,8 @@ export default function CityDesigner() {
   }, [dragState]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
-    if (!isPanning || !svgRef.current || dragState) return;
+    if (!isPanning || !svgRef.current) return;
+    if (dragState && !isCtrlPanningRef.current) return;
     const rect = svgRef.current.getBoundingClientRect();
     setViewBox(prev => {
       if (!prev) return prev;
@@ -733,8 +771,12 @@ export default function CityDesigner() {
   }, [isPanning, dragState]);
 
   const handleMouseUp = useCallback(() => {
+    // Keep suppress flag until global drag mouseup runs, otherwise event ordering
+    // can accidentally commit a drop after Ctrl-pan.
+    if (!dragState) suppressDropOnMouseUpRef.current = false;
+    isCtrlPanningRef.current = false;
     setIsPanning(false);
-  }, []);
+  }, [dragState]);
 
   const toggleType = (type: string) => {
     setHiddenTypes(prev => {
@@ -889,16 +931,18 @@ export default function CityDesigner() {
     }
 
     return [...grouped.values()].sort((a, b) => {
+      const direction = parkedSortDirection === 'asc' ? 1 : -1;
+
       if (parkedSortMode === 'era') {
         const eraDiff = (ERA_RANK[a.era] ?? 999) - (ERA_RANK[b.era] ?? 999);
-        if (eraDiff !== 0) return eraDiff;
+        if (eraDiff !== 0) return eraDiff * direction;
       } else if (parkedSortMode === 'size') {
         const areaDiff = sizeArea(a.sizeKey) - sizeArea(b.sizeKey);
-        if (areaDiff !== 0) return areaDiff;
+        if (areaDiff !== 0) return areaDiff * direction;
       }
-      return a.name.localeCompare(b.name) || a.era.localeCompare(b.era);
+      return (a.name.localeCompare(b.name) || a.era.localeCompare(b.era)) * direction;
     });
-  }, [allBuildings, parkedIds, matchesFilters, data, parkedSortMode]);
+  }, [allBuildings, parkedIds, matchesFilters, data, parkedSortMode, parkedSortDirection]);
 
   if (!data || !bounds || !viewBox) return null;
 
@@ -1019,19 +1063,28 @@ export default function CityDesigner() {
         <aside className={`designer-panel ${dragState?.overPanel ? 'drop-ready' : ''}`} ref={panelRef}>
           <div className="designer-panel-header">
             <h3>Staging Area</h3>
-            <button
-              className={`designer-sort-btn ${parkedSortMode !== 'name' ? 'active' : ''}`}
-              onClick={() => setParkedSortMode(prev => prev === 'name' ? 'era' : prev === 'era' ? 'size' : 'name')}
-              title={
-                parkedSortMode === 'name'
-                  ? 'Currently sorting parked stacks by name'
-                  : parkedSortMode === 'era'
-                    ? 'Currently sorting parked stacks by era'
-                    : 'Currently sorting parked stacks by total size area'
-              }
-            >
-              Sort: {parkedSortMode === 'name' ? 'Name' : parkedSortMode === 'era' ? 'Era' : 'Size'}
-            </button>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                className={`designer-sort-btn ${parkedSortMode !== 'name' ? 'active' : ''}`}
+                onClick={() => setParkedSortMode(prev => prev === 'name' ? 'era' : prev === 'era' ? 'size' : 'name')}
+                title={
+                  parkedSortMode === 'name'
+                    ? 'Currently sorting parked stacks by name'
+                    : parkedSortMode === 'era'
+                      ? 'Currently sorting parked stacks by era'
+                      : 'Currently sorting parked stacks by total size area'
+                }
+              >
+                Sort: {parkedSortMode === 'name' ? 'Name' : parkedSortMode === 'era' ? 'Era' : 'Size'}
+              </button>
+              <button
+                className={`designer-sort-btn ${parkedSortDirection === 'desc' ? 'active' : ''}`}
+                onClick={() => setParkedSortDirection(prev => prev === 'asc' ? 'desc' : 'asc')}
+                title={parkedSortDirection === 'asc' ? 'Ascending order' : 'Descending order'}
+              >
+                Order: {parkedSortDirection === 'asc' ? 'Asc' : 'Desc'}
+              </button>
+            </div>
           </div>
           <p>Drag buildings here to get them out of the way, then drag them back onto the map.</p>
           <div className="designer-metrics">
@@ -1045,8 +1098,8 @@ export default function CityDesigner() {
                 <button
                   key={stack.key}
                   className="designer-item parked"
-                  onMouseDown={(e) => startDrag(e, stack.id)}
-                  title="Drag onto map or staging area"
+                  onClick={(e) => startDrag(e, stack.id)}
+                  title="Click to pick up, then click a valid map cell to place"
                 >
                   <span className="designer-item-color" style={{ background: getBuildingColor(stack.type) }} />
                   <span className="designer-item-name">{stack.name}</span>
@@ -1229,7 +1282,7 @@ export default function CityDesigner() {
         </div>
       </div>
 
-      <p className="grid-hint">Scroll to zoom · drag background to pan · drag to move · Alt+Click to stage · Ctrl+Z to undo · drag parked road to lay a line</p>
+      <p className="grid-hint">Scroll to zoom · drag background to pan · drag to move · Alt+Click to stage · Ctrl+Z to undo · click parked item to pick up, click map to place</p>
     </div>
   );
 }
