@@ -6,7 +6,7 @@ import { ERA_RANK, extractEra, resolveBuildingName } from '../utils/dataProcessi
 const CELL_SIZE = 12;
 
 type RoadNeed = 'none' | 'road1' | 'road2';
-type ParkedSortMode = 'name' | 'era';
+type ParkedSortMode = 'name' | 'era' | 'size';
 
 interface DesignerBuilding extends PlacedBuilding {
   sizeKey: string;
@@ -85,6 +85,12 @@ function pointInRect(x: number, y: number, rect: DOMRect): boolean {
   return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
 }
 
+function sizeArea(sizeKey: string): number {
+  const [w, h] = sizeKey.split('x').map(Number);
+  if (!Number.isFinite(w) || !Number.isFinite(h)) return 0;
+  return w * h;
+}
+
 export default function CityDesigner() {
   const { data } = useCityData();
   const svgRef = useRef<SVGSVGElement>(null);
@@ -126,6 +132,8 @@ export default function CityDesigner() {
   const roadDropdownRef = useRef<HTMLDivElement>(null);
 
   const getRoadNeed = useCallback((b: PlacedBuilding): RoadNeed => {
+    if (INHERENT_NO_ROAD_TYPES.has(b.entry.type)) return 'none';
+
     const entity = data?.CityEntities?.[b.entry.cityentity_id];
     const rootLevel = entity?.requirements?.street_connection_level ?? 0;
     let componentLevel = 0;
@@ -138,7 +146,6 @@ export default function CityDesigner() {
     const requiredLevel = Math.max(rootLevel, componentLevel);
     if (requiredLevel >= 2) return 'road2';
     if (requiredLevel === 1) return 'road1';
-    if (INHERENT_NO_ROAD_TYPES.has(b.entry.type)) return 'none';
     return 'none';
   }, [data]);
 
@@ -335,7 +342,7 @@ export default function CityDesigner() {
       let valid = candidate ? canPlaceRef.current(dragId, candidate.x, candidate.y) : false;
       let lineCells: LineCell[] | null = null;
 
-      // Road line mode: only when dragging from staging
+      // Road line mode: only after a start cell is locked by click.
       if (dragState.isStreet && dragState.originParked && dragState.startGrid && dragState.lineIds.length > 0) {
         const sg = dragState.startGrid;
         const building = buildingByIdRef.current.get(dragId);
@@ -348,12 +355,13 @@ export default function CityDesigner() {
           const primary = useH ? dx : dy;
           const dir = primary >= 0 ? 1 : -1;
           const stepsAway = Math.floor(Math.abs(primary) / step);
-          const count = Math.min(stepsAway + 1, dragState.lineIds.length);
+          const count = Math.min(stepsAway, dragState.lineIds.length);
 
           lineCells = [];
           for (let i = 0; i < count; i++) {
-            const cx = useH ? sg.x + dir * i * step : sg.x;
-            const cy = useH ? sg.y : sg.y + dir * i * step;
+            const offset = i + 1; // first line segment starts adjacent to start cell
+            const cx = useH ? sg.x + dir * offset * step : sg.x;
+            const cy = useH ? sg.y : sg.y + dir * offset * step;
             lineCells.push({ x: cx, y: cy, valid: canPlaceRef.current(dragState.lineIds[i], cx, cy) });
           }
 
@@ -373,9 +381,59 @@ export default function CityDesigner() {
     };
 
     const onMouseUp = () => {
-      // ── Road line drop ──────────────────────────────────────────────
-      if (dragState.lineCells && dragState.lineCells.length > 0 && !dragState.overPanel) {
-        const validCells = dragState.lineCells.filter(c => c.valid);
+      // ── Street tool (staged roads): click-to-start, click-to-commit line ──
+      if (dragState.isStreet && dragState.originParked) {
+        if (dragState.overPanel) {
+          setIsPanning(false);
+          return;
+        }
+
+        // First click: place one road and lock start cell for line drawing.
+        if (!dragState.startGrid) {
+          if (dragState.candidate && dragState.valid) {
+            const start = dragState.candidate;
+            const remaining = dragState.lineIds.slice(1);
+
+            recordHistory();
+            setPositions(prev => {
+              const next = new Map(prev);
+              next.set(dragState.id, start);
+              return next;
+            });
+            setParkedIds(prev => {
+              const next = new Set(prev);
+              next.delete(dragState.id);
+              return next;
+            });
+
+            if (remaining.length > 0) {
+              const mx = mousePositionRef.current.x;
+              const my = mousePositionRef.current.y;
+              const cg = screenToGridRef.current(mx, my);
+              setDragState({
+                id: remaining[0],
+                origin: positionsRef.current.get(remaining[0]) ?? null,
+                originParked: true,
+                pointer: { x: mx, y: my },
+                overPanel: false,
+                candidate: cg,
+                valid: false,
+                startGrid: start,
+                cityentityId: dragState.cityentityId,
+                isStreet: true,
+                lineCells: null,
+                lineIds: remaining,
+              });
+            } else {
+              setDragState(null);
+            }
+          }
+          setIsPanning(false);
+          return;
+        }
+
+        // Second click: commit the previewed line (if any valid segments).
+        const validCells = (dragState.lineCells ?? []).filter(c => c.valid);
         if (validCells.length > 0) {
           recordHistory();
           setPositions(prev => {
@@ -391,21 +449,20 @@ export default function CityDesigner() {
             return next;
           });
 
-          // Are there more of the same road type still parked?
           const remaining = dragState.lineIds.slice(validCells.length);
           if (remaining.length > 0) {
             const mx = mousePositionRef.current.x;
             const my = mousePositionRef.current.y;
-            const sg = screenToGridRef.current(mx, my);
+            const cg = screenToGridRef.current(mx, my);
             setDragState({
               id: remaining[0],
               origin: positionsRef.current.get(remaining[0]) ?? null,
               originParked: true,
               pointer: { x: mx, y: my },
               overPanel: false,
-              candidate: sg,
-              valid: sg ? canPlaceRef.current(remaining[0], sg.x, sg.y) : false,
-              startGrid: sg,
+              candidate: cg,
+              valid: !!cg && canPlaceRef.current(remaining[0], cg.x, cg.y),
+              startGrid: null,
               cityentityId: dragState.cityentityId,
               isStreet: true,
               lineCells: null,
@@ -414,16 +471,6 @@ export default function CityDesigner() {
           } else {
             setDragState(null);
           }
-        } else {
-          // Nothing valid — restore original
-          if (dragState.origin) {
-            setPositions(prev => {
-              const next = new Map(prev);
-              next.set(dragState.id, dragState.origin!);
-              return next;
-            });
-          }
-          setDragState(null);
         }
         setIsPanning(false);
         return;
@@ -574,6 +621,19 @@ export default function CityDesigner() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [applyLayoutSnapshot]);
 
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (!dragState?.isStreet || !dragState.originParked) return;
+      e.preventDefault();
+      setDragState(null);
+      setIsPanning(false);
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [dragState]);
+
   const handleWheel = useCallback((e: WheelEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -635,7 +695,7 @@ export default function CityDesigner() {
       overPanel: false,
       candidate,
       valid: !!candidate && canPlaceRef.current(buildingId, candidate.x, candidate.y),
-      startGrid: candidate,
+      startGrid: (isStreet && isParked) ? null : candidate,
       cityentityId: source.entry.cityentity_id,
       isStreet,
       lineCells: null,
@@ -832,6 +892,9 @@ export default function CityDesigner() {
       if (parkedSortMode === 'era') {
         const eraDiff = (ERA_RANK[a.era] ?? 999) - (ERA_RANK[b.era] ?? 999);
         if (eraDiff !== 0) return eraDiff;
+      } else if (parkedSortMode === 'size') {
+        const areaDiff = sizeArea(a.sizeKey) - sizeArea(b.sizeKey);
+        if (areaDiff !== 0) return areaDiff;
       }
       return a.name.localeCompare(b.name) || a.era.localeCompare(b.era);
     });
@@ -957,11 +1020,17 @@ export default function CityDesigner() {
           <div className="designer-panel-header">
             <h3>Staging Area</h3>
             <button
-              className={`designer-sort-btn ${parkedSortMode === 'era' ? 'active' : ''}`}
-              onClick={() => setParkedSortMode(prev => prev === 'name' ? 'era' : 'name')}
-              title={parkedSortMode === 'era' ? 'Currently sorting parked stacks by era' : 'Currently sorting parked stacks by name'}
+              className={`designer-sort-btn ${parkedSortMode !== 'name' ? 'active' : ''}`}
+              onClick={() => setParkedSortMode(prev => prev === 'name' ? 'era' : prev === 'era' ? 'size' : 'name')}
+              title={
+                parkedSortMode === 'name'
+                  ? 'Currently sorting parked stacks by name'
+                  : parkedSortMode === 'era'
+                    ? 'Currently sorting parked stacks by era'
+                    : 'Currently sorting parked stacks by total size area'
+              }
             >
-              Sort: {parkedSortMode === 'era' ? 'Era' : 'Name'}
+              Sort: {parkedSortMode === 'name' ? 'Name' : parkedSortMode === 'era' ? 'Era' : 'Size'}
             </button>
           </div>
           <p>Drag buildings here to get them out of the way, then drag them back onto the map.</p>
