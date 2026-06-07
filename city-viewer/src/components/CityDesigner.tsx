@@ -24,6 +24,8 @@ interface DragState {
   id: number;
   origin: { x: number; y: number } | null;
   originParked: boolean;
+  groupIds: number[];
+  groupOffsets: Record<number, { dx: number; dy: number }>;
   pointer: { x: number; y: number };
   overPanel: boolean;
   candidate: { x: number; y: number } | null;
@@ -56,6 +58,11 @@ interface ParkedStack {
 interface LayoutSnapshot {
   positions: Map<number, { x: number; y: number }>;
   parkedIds: Set<number>;
+}
+
+interface SelectionRegion {
+  start: { x: number; y: number };
+  end: { x: number; y: number };
 }
 
 const LAYOUT_STORAGE_KEY = 'foe-city-designer-layouts-v1';
@@ -110,6 +117,8 @@ export default function CityDesigner() {
 
   const [positions, setPositions] = useState<Map<number, { x: number; y: number }>>(new Map());
   const [parkedIds, setParkedIds] = useState<Set<number>>(new Set());
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [selectionRegion, setSelectionRegion] = useState<SelectionRegion | null>(null);
 
   const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set());
   const [hiddenSizes, setHiddenSizes] = useState<Set<string>>(new Set());
@@ -215,6 +224,8 @@ export default function CityDesigner() {
     for (const b of allBuildings) next.set(b.entry.id, { x: b.x, y: b.y });
     setPositions(next);
     setParkedIds(new Set());
+    setSelectedIds(new Set());
+    setSelectionRegion(null);
     setViewBox(null);
     historyRef.current = [];
   }, [allBuildings]);
@@ -319,6 +330,41 @@ export default function CityDesigner() {
     return false;
   };
 
+  const canPlaceGroup = useCallback((drag: DragState, anchorX: number, anchorY: number): boolean => {
+    const groupSet = new Set(drag.groupIds);
+    const moved: Array<{ id: number; x: number; y: number; w: number; h: number }> = [];
+
+    for (const id of drag.groupIds) {
+      const b = buildingByIdRef.current.get(id);
+      if (!b) return false;
+      const off = drag.groupOffsets[id] ?? { dx: 0, dy: 0 };
+      const x = anchorX + off.dx;
+      const y = anchorY + off.dy;
+
+      for (let dx = 0; dx < b.width; dx++) {
+        for (let dy = 0; dy < b.length; dy++) {
+          if (!unlockedCellsRef.current.has(`${x + dx},${y + dy}`)) return false;
+        }
+      }
+
+      moved.push({ id, x, y, w: b.width, h: b.length });
+    }
+
+    for (const other of allBuildingsRef.current) {
+      if (groupSet.has(other.entry.id)) continue;
+      if (parkedIdsRef.current.has(other.entry.id)) continue;
+
+      const p = positionsRef.current.get(other.entry.id) ?? { x: other.x, y: other.y };
+      for (const m of moved) {
+        const overlapX = m.x < p.x + other.width && m.x + m.w > p.x;
+        const overlapY = m.y < p.y + other.length && m.y + m.h > p.y;
+        if (overlapX && overlapY) return false;
+      }
+    }
+
+    return true;
+  }, []);
+
   const screenToGrid = useCallback((clientX: number, clientY: number): { x: number; y: number } | null => {
     if (!svgRef.current || !viewBox) return null;
     const rect = svgRef.current.getBoundingClientRect();
@@ -372,6 +418,8 @@ export default function CityDesigner() {
           candidate = { x: sg.x, y: sg.y };
           valid = lineCells.length > 0 && lineCells.some(c => c.valid);
         }
+      } else if (!dragState.originParked && candidate) {
+        valid = canPlaceGroup(dragState, candidate.x, candidate.y);
       }
 
       setDragState(prev => prev ? {
@@ -425,6 +473,8 @@ export default function CityDesigner() {
                 id: remaining[0],
                 origin: positionsRef.current.get(remaining[0]) ?? null,
                 originParked: true,
+                groupIds: [remaining[0]],
+                groupOffsets: { [remaining[0]]: { dx: 0, dy: 0 } },
                 pointer: { x: mx, y: my },
                 overPanel: false,
                 candidate: cg,
@@ -469,6 +519,8 @@ export default function CityDesigner() {
               id: remaining[0],
               origin: positionsRef.current.get(remaining[0]) ?? null,
               originParked: true,
+              groupIds: [remaining[0]],
+              groupOffsets: { [remaining[0]]: { dx: 0, dy: 0 } },
               pointer: { x: mx, y: my },
               overPanel: false,
               candidate: cg,
@@ -504,12 +556,22 @@ export default function CityDesigner() {
         recordHistory();
         setPositions(prev => {
           const next = new Map(prev);
-          next.set(dragState.id, dragState.candidate!);
+          if (!dragState.originParked) {
+            const anchor = dragState.candidate!;
+            for (const id of dragState.groupIds) {
+              const off = dragState.groupOffsets[id] ?? { dx: 0, dy: 0 };
+              next.set(id, { x: anchor.x + off.dx, y: anchor.y + off.dy });
+            }
+          } else {
+            next.set(dragState.id, dragState.candidate!);
+          }
           return next;
         });
         setParkedIds(prev => {
           const next = new Set(prev);
-          next.delete(dragState.id);
+          if (dragState.originParked) {
+            next.delete(dragState.id);
+          }
           return next;
         });
 
@@ -528,6 +590,8 @@ export default function CityDesigner() {
               id: nextB.entry.id,
               origin: positionsRef.current.get(nextB.entry.id) ?? null,
               originParked: true,
+              groupIds: [nextB.entry.id],
+              groupOffsets: { [nextB.entry.id]: { dx: 0, dy: 0 } },
               pointer: { x: mx, y: my },
               overPanel: false,
               candidate: sg,
@@ -642,15 +706,23 @@ export default function CityDesigner() {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
-      if (!dragState?.originParked) return;
-      e.preventDefault();
-      setDragState(null);
-      setIsPanning(false);
+      if (dragState?.originParked) {
+        e.preventDefault();
+        setDragState(null);
+        setIsPanning(false);
+        return;
+      }
+
+      if (selectedIds.size > 0 || selectionRegion) {
+        e.preventDefault();
+        setSelectedIds(new Set());
+        setSelectionRegion(null);
+      }
     };
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [dragState]);
+  }, [dragState, selectedIds, selectionRegion]);
 
   const handleWheel = useCallback((e: WheelEvent) => {
     e.preventDefault();
@@ -692,6 +764,22 @@ export default function CityDesigner() {
     const origin = positions.get(buildingId) ?? { x: source.x, y: source.y };
     const candidate = screenToGridRef.current(e.clientX, e.clientY);
 
+    const groupIds = isParked
+      ? [buildingId]
+      : (selectedIds.has(buildingId)
+        ? [...selectedIds].filter(id => !parkedIds.has(id))
+        : [buildingId]);
+    const uniqueGroupIds = Array.from(new Set(groupIds));
+    const groupOffsets: Record<number, { dx: number; dy: number }> = {};
+    for (const id of uniqueGroupIds) {
+      const p = positions.get(id) ?? { x: buildingById.get(id)?.x ?? origin.x, y: buildingById.get(id)?.y ?? origin.y };
+      groupOffsets[id] = { dx: p.x - origin.x, dy: p.y - origin.y };
+    }
+
+    if (!isParked && !selectedIds.has(buildingId)) {
+      setSelectedIds(new Set([buildingId]));
+    }
+
     // Build the pool of same-type parked IDs for road line mode
     const lineIds: number[] = [];
     if (isStreet && isParked) {
@@ -710,20 +798,70 @@ export default function CityDesigner() {
       id: buildingId,
       origin,
       originParked: isParked,
+      groupIds: uniqueGroupIds,
+      groupOffsets,
       pointer: { x: e.clientX, y: e.clientY },
       overPanel: false,
       candidate,
-      valid: !!candidate && canPlaceRef.current(buildingId, candidate.x, candidate.y),
+      valid: !!candidate && (isParked
+        ? canPlaceRef.current(buildingId, candidate.x, candidate.y)
+        : canPlaceGroup({
+          id: buildingId,
+          origin,
+          originParked: isParked,
+          groupIds: uniqueGroupIds,
+          groupOffsets,
+          pointer: { x: e.clientX, y: e.clientY },
+          overPanel: false,
+          candidate,
+          valid: false,
+          startGrid: null,
+          cityentityId: source.entry.cityentity_id,
+          isStreet,
+          lineCells: null,
+          lineIds: [],
+        }, candidate.x, candidate.y)),
       startGrid: (isStreet && isParked) ? null : candidate,
       cityentityId: source.entry.cityentity_id,
       isStreet,
       lineCells: null,
       lineIds,
     });
-  }, [buildingById, positions, parkedIds, allBuildings, dragState]);
+  }, [buildingById, positions, parkedIds, allBuildings, dragState, selectedIds, canPlaceGroup]);
+
+  const finishSelectionRegion = useCallback((region: SelectionRegion) => {
+    const minX = Math.min(region.start.x, region.end.x);
+    const minY = Math.min(region.start.y, region.end.y);
+    const maxX = Math.max(region.start.x, region.end.x) + 1;
+    const maxY = Math.max(region.start.y, region.end.y) + 1;
+
+    const toAdd = new Set<number>();
+    for (const b of allBuildings) {
+      if (parkedIds.has(b.entry.id)) continue;
+      const p = positions.get(b.entry.id) ?? { x: b.x, y: b.y };
+      const overlapX = p.x < maxX && p.x + b.width > minX;
+      const overlapY = p.y < maxY && p.y + b.length > minY;
+      if (overlapX && overlapY) toAdd.add(b.entry.id);
+    }
+
+    if (toAdd.size === 0) return;
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      toAdd.forEach(id => next.add(id));
+      return next;
+    });
+  }, [allBuildings, parkedIds, positions]);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     if (e.button !== 0) return;
+
+    if (e.shiftKey && !dragState) {
+      const start = screenToGridRef.current(e.clientX, e.clientY);
+      if (!start) return;
+      setSelectionRegion({ start, end: start });
+      setIsPanning(false);
+      return;
+    }
 
     if (e.ctrlKey) {
       isCtrlPanningRef.current = true;
@@ -755,6 +893,14 @@ export default function CityDesigner() {
   }, [dragState]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (selectionRegion) {
+      const end = screenToGridRef.current(e.clientX, e.clientY);
+      if (end) {
+        setSelectionRegion(prev => prev ? { ...prev, end } : prev);
+      }
+      return;
+    }
+
     if (!isPanning || !svgRef.current) return;
     if (dragState && !isCtrlPanningRef.current) return;
     const rect = svgRef.current.getBoundingClientRect();
@@ -768,15 +914,22 @@ export default function CityDesigner() {
         y: panStart.current.vy - dy,
       };
     });
-  }, [isPanning, dragState]);
+  }, [isPanning, dragState, selectionRegion]);
 
   const handleMouseUp = useCallback(() => {
+    if (selectionRegion) {
+      finishSelectionRegion(selectionRegion);
+      setSelectionRegion(null);
+      setIsPanning(false);
+      return;
+    }
+
     // Keep suppress flag until global drag mouseup runs, otherwise event ordering
     // can accidentally commit a drop after Ctrl-pan.
     if (!dragState) suppressDropOnMouseUpRef.current = false;
     isCtrlPanningRef.current = false;
     setIsPanning(false);
-  }, [dragState]);
+  }, [dragState, selectionRegion, finishSelectionRegion]);
 
   const toggleType = (type: string) => {
     setHiddenTypes(prev => {
@@ -1177,7 +1330,7 @@ export default function CityDesigner() {
               </g>
             ))}
 
-            {mapBuildings.filter(b => b.entry.id !== dragState?.id).map(b => (
+            {mapBuildings.filter(b => !dragState?.groupIds.includes(b.entry.id)).map(b => (
               <g key={b.entry.id}>
                 <rect
                   x={b.x * CELL_SIZE + 0.5}
@@ -1186,10 +1339,20 @@ export default function CityDesigner() {
                   height={b.length * CELL_SIZE - 1}
                   fill={getBuildingColor(b.entry.type)}
                   opacity={0.85}
-                  stroke="rgba(0,0,0,0.35)"
-                  strokeWidth={0.6}
+                  stroke={selectedIds.has(b.entry.id) ? 'rgba(241, 196, 15, 0.95)' : 'rgba(0,0,0,0.35)'}
+                  strokeWidth={selectedIds.has(b.entry.id) ? 1.6 : 0.6}
                   rx={1}
                   onMouseDown={(e) => {
+                    if (e.shiftKey) {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setSelectedIds(prev => {
+                        const next = new Set(prev);
+                        next.add(b.entry.id);
+                        return next;
+                      });
+                      return;
+                    }
                     if (e.altKey) {
                       e.preventDefault();
                       e.stopPropagation();
@@ -1237,6 +1400,26 @@ export default function CityDesigner() {
               </g>
             ))}
 
+            {selectionRegion && (() => {
+              const minX = Math.min(selectionRegion.start.x, selectionRegion.end.x);
+              const minY = Math.min(selectionRegion.start.y, selectionRegion.end.y);
+              const maxX = Math.max(selectionRegion.start.x, selectionRegion.end.x) + 1;
+              const maxY = Math.max(selectionRegion.start.y, selectionRegion.end.y) + 1;
+              return (
+                <rect
+                  x={minX * CELL_SIZE + 0.5}
+                  y={minY * CELL_SIZE + 0.5}
+                  width={(maxX - minX) * CELL_SIZE - 1}
+                  height={(maxY - minY) * CELL_SIZE - 1}
+                  fill="rgba(52, 152, 219, 0.2)"
+                  stroke="rgba(52, 152, 219, 0.95)"
+                  strokeWidth={1.2}
+                  strokeDasharray="2 2"
+                  pointerEvents="none"
+                />
+              );
+            })()}
+
             {dragState && buildingById.get(dragState.id) && (() => {
               const b = buildingById.get(dragState.id);
               if (!b) return null;
@@ -1264,6 +1447,34 @@ export default function CityDesigner() {
 
               // Single tile preview
               if (!dragState.candidate) return null;
+
+              if (!dragState.originParked && dragState.groupIds.length > 1) {
+                return (
+                  <g pointerEvents="none">
+                    {dragState.groupIds.map(id => {
+                      const gb = buildingById.get(id);
+                      if (!gb) return null;
+                      const off = dragState.groupOffsets[id] ?? { dx: 0, dy: 0 };
+                      const x = dragState.candidate!.x + off.dx;
+                      const y = dragState.candidate!.y + off.dy;
+                      return (
+                        <rect
+                          key={id}
+                          x={x * CELL_SIZE + 0.5}
+                          y={y * CELL_SIZE + 0.5}
+                          width={gb.width * CELL_SIZE - 1}
+                          height={gb.length * CELL_SIZE - 1}
+                          fill={dragState.valid ? 'rgba(88, 214, 141, 0.35)' : 'rgba(231, 76, 60, 0.3)'}
+                          stroke={dragState.valid ? 'rgba(88, 214, 141, 0.95)' : 'rgba(231, 76, 60, 0.95)'}
+                          strokeWidth={1.4}
+                          rx={1}
+                        />
+                      );
+                    })}
+                  </g>
+                );
+              }
+
               return (
                 <rect
                   x={dragState.candidate.x * CELL_SIZE + 0.5}
@@ -1282,7 +1493,7 @@ export default function CityDesigner() {
         </div>
       </div>
 
-      <p className="grid-hint">Scroll to zoom · drag background to pan · drag to move · Alt+Click to stage · Ctrl+Z to undo · click parked item to pick up, click map to place</p>
+      <p className="grid-hint">Scroll to zoom · drag background to pan · Ctrl+drag to pan during placement · Shift+click add selection · Shift+drag marquee select · drag to move · Alt+Click to stage · Ctrl+Z to undo · click parked item to pick up, click map to place</p>
     </div>
   );
 }
