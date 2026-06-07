@@ -18,6 +18,7 @@ function AppContent() {
   const { data, setData } = useCityData();
   const [activeTab, setActiveTab] = useState<Tab>('production');
   const [dragOver, setDragOver] = useState(false);
+  const [designerFullscreen, setDesignerFullscreen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const loadFile = useCallback((file: File) => {
@@ -49,7 +50,7 @@ function AppContent() {
   if (!data) return <DataLoader />;
 
   return (
-    <div className="app">
+    <div className={`app${designerFullscreen ? ' designer-fullscreen' : ''}`}>
       <header className="app-header">
         <div className="header-left">
           <h1>FOE City Viewer</h1>
@@ -108,7 +109,7 @@ function AppContent() {
         {activeTab === 'buildings' && <BuildingTable />}
         {activeTab === 'military' && <MilitaryTable />}
         {activeTab === 'grid' && <CityGrid />}
-        {activeTab === 'designer' && <CityDesigner />}
+        {activeTab === 'designer' && <CityDesigner isFullscreen={designerFullscreen} onFullscreenChange={setDesignerFullscreen} />}
         {activeTab === 'greatbuildings' && <GreatBuildings />}
         {activeTab === 'optimizer' && <LayoutOptimizer />}
       </main>

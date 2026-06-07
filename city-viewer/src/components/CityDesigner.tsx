@@ -99,7 +99,7 @@ function sizeArea(sizeKey: string): number {
   return w * h;
 }
 
-export default function CityDesigner() {
+export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isFullscreen: boolean; onFullscreenChange: (fullscreen: boolean) => void }) {
   const { data } = useCityData();
   const svgRef = useRef<SVGSVGElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -706,6 +706,14 @@ export default function CityDesigner() {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
+      
+      // Exit fullscreen if active
+      if (isFullscreen) {
+        e.preventDefault();
+        onFullscreenChange(false);
+        return;
+      }
+      
       if (dragState?.originParked) {
         e.preventDefault();
         setDragState(null);
@@ -722,7 +730,33 @@ export default function CityDesigner() {
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [dragState, selectedIds, selectionRegion]);
+  }, [dragState, selectedIds, selectionRegion, isFullscreen, onFullscreenChange]);
+
+  useEffect(() => {
+    const isEditableTarget = (target: EventTarget | null): boolean => {
+      if (!(target instanceof HTMLElement)) return false;
+      const tag = target.tagName;
+      return target.isContentEditable || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+    };
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+      if (isEditableTarget(e.target)) return;
+      if (selectedIds.size === 0 || dragState) return;
+
+      e.preventDefault();
+      recordHistory();
+      setParkedIds(prev => {
+        const next = new Set(prev);
+        selectedIds.forEach(id => next.add(id));
+        return next;
+      });
+      setSelectedIds(new Set());
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [selectedIds, dragState, recordHistory]);
 
   const handleWheel = useCallback((e: WheelEvent) => {
     e.preventDefault();
@@ -753,13 +787,19 @@ export default function CityDesigner() {
   }, []);
 
   const startDrag = useCallback((e: React.MouseEvent, buildingId: number) => {
-    if (dragState) return;
-    e.preventDefault();
-    e.stopPropagation();
+    if (e.ctrlKey) return;
+    
     const source = buildingById.get(buildingId);
     if (!source) return;
-
+    
     const isParked = parkedIds.has(buildingId);
+    
+    // Allow switching between parked items, but not from placed to parked
+    if (dragState && !(isParked && dragState.originParked)) return;
+    
+    e.preventDefault();
+    e.stopPropagation();
+
     const isStreet = source.entry.type === 'street';
     const origin = positions.get(buildingId) ?? { x: source.x, y: source.y };
     const candidate = screenToGridRef.current(e.clientX, e.clientY);
@@ -1208,6 +1248,13 @@ export default function CityDesigner() {
             >
               Reset Layout
             </button>
+            <button
+              className="grid-dropdown-btn"
+              title={isFullscreen ? "Exit fullscreen (ESC)" : "Hide top bar and tabs"}
+              onClick={() => onFullscreenChange(!isFullscreen)}
+            >
+              {isFullscreen ? '⛶ Exit Fullscreen' : '⛶ Fullscreen'}
+            </button>
           </div>
         </div>
       </div>
@@ -1250,9 +1297,9 @@ export default function CityDesigner() {
               return (
                 <button
                   key={stack.key}
-                  className="designer-item parked"
+                  className={`designer-item parked${dragState?.id === stack.id || (dragState?.originParked && dragState?.cityentityId === stack.key.split('::')[0]) ? ' active-drag' : ''}`}
                   onClick={(e) => startDrag(e, stack.id)}
-                  title="Click to pick up, then click a valid map cell to place"
+                  title="Click to pick up and place, or click another item to switch"
                 >
                   <span className="designer-item-color" style={{ background: getBuildingColor(stack.type) }} />
                   <span className="designer-item-name">{stack.name}</span>
@@ -1494,6 +1541,23 @@ export default function CityDesigner() {
       </div>
 
       <p className="grid-hint">Scroll to zoom · drag background to pan · Ctrl+drag to pan during placement · Shift+click add selection · Shift+drag marquee select · drag to move · Alt+Click to stage · Ctrl+Z to undo · click parked item to pick up, click map to place</p>
+
+      {dragState?.originParked && (() => {
+        const b = buildingById.get(dragState.id);
+        if (!b) return null;
+        const name = resolveBuildingName(b.entry.cityentity_id, data);
+        const color = getBuildingColor(b.entry.type);
+        return (
+          <div
+            className="designer-drag-ghost"
+            style={{ left: dragState.pointer.x + 14, top: dragState.pointer.y + 14 }}
+          >
+            <span className="designer-drag-ghost-swatch" style={{ background: color }} />
+            <span className="designer-drag-ghost-label">{name}</span>
+            <span className="designer-drag-ghost-size">{b.width}×{b.length}</span>
+          </div>
+        );
+      })()}
     </div>
   );
 }
