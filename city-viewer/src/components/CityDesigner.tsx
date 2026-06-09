@@ -1246,6 +1246,22 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
     });
   };
 
+  const clearAllFilters = useCallback(() => {
+    setHiddenTypes(new Set());
+    setHiddenSizes(new Set());
+    setHiddenRoadNeeds(new Set());
+    setSearchText('');
+    setTypeDropdownOpen(false);
+    setSizeDropdownOpen(false);
+    setRoadDropdownOpen(false);
+  }, []);
+
+  const hasActiveFilters =
+    hiddenTypes.size > 0 ||
+    hiddenSizes.size > 0 ||
+    hiddenRoadNeeds.size > 0 ||
+    searchText.trim().length > 0;
+
   const parkBuilding = useCallback((buildingId: number) => {
     if (parkedIdsRef.current.has(buildingId)) return;
     recordHistory();
@@ -1459,149 +1475,76 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
     ? 'grabbing'
     : (dragState?.originParked ? 'crosshair' : 'default');
 
+  const isLabelLikelyClipped = useCallback((name: string, width: number, length: number): boolean => {
+    const cells = width * length;
+    // Rough per-cell character capacity for the tiny in-tile label.
+    const capacity = Math.max(6, cells * 4);
+    return name.length > capacity;
+  }, []);
+
   if (!data || !bounds || !viewBox) return null;
 
   return (
     <div className="city-designer-container">
       <div className="grid-header">
         <h2>City Designer</h2>
-        <div className="grid-toolbar">
-          <div className="grid-dropdown" ref={typeDropdownRef}>
-            <button className="grid-dropdown-btn" onClick={() => setTypeDropdownOpen(v => !v)}>
-              {hiddenTypes.size === 0 ? 'All Types' : `${presentTypes.length - hiddenTypes.size} of ${presentTypes.length} Types`}
-              <span className="grid-dropdown-arrow">{typeDropdownOpen ? '\u25B2' : '\u25BC'}</span>
-            </button>
-            {typeDropdownOpen && (
-              <div className="grid-dropdown-menu">
-                <label className="grid-dropdown-item grid-dropdown-all">
-                  <input
-                    type="checkbox"
-                    checked={hiddenTypes.size === 0}
-                    onChange={() => setHiddenTypes(hiddenTypes.size === 0 ? new Set(presentTypes) : new Set())}
-                  />
-                  All
-                </label>
-                {presentTypes.map(type => (
-                  <label key={type} className="grid-dropdown-item">
-                    <input type="checkbox" checked={!hiddenTypes.has(type)} onChange={() => toggleType(type)} />
-                    <span className="legend-color" style={{ background: getBuildingColor(type) }} />
-                    {TYPE_LABELS[type] ?? type.replace(/_/g, ' ')}
-                  </label>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="grid-dropdown" ref={sizeDropdownRef}>
-            <button className="grid-dropdown-btn" onClick={() => setSizeDropdownOpen(v => !v)}>
-              {hiddenSizes.size === 0 ? 'All Sizes' : `${presentSizes.length - hiddenSizes.size} of ${presentSizes.length} Sizes`}
-              <span className="grid-dropdown-arrow">{sizeDropdownOpen ? '\u25B2' : '\u25BC'}</span>
-            </button>
-            {sizeDropdownOpen && (
-              <div className="grid-dropdown-menu">
-                <label className="grid-dropdown-item grid-dropdown-all">
-                  <input
-                    type="checkbox"
-                    checked={hiddenSizes.size === 0}
-                    onChange={() => setHiddenSizes(hiddenSizes.size === 0 ? new Set(presentSizes) : new Set())}
-                  />
-                  All
-                </label>
-                {presentSizes.map(size => (
-                  <label key={size} className="grid-dropdown-item">
-                    <input type="checkbox" checked={!hiddenSizes.has(size)} onChange={() => toggleSize(size)} />
-                    {size}
-                  </label>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="grid-dropdown" ref={roadDropdownRef}>
-            <button className="grid-dropdown-btn" onClick={() => setRoadDropdownOpen(v => !v)}>
-              {hiddenRoadNeeds.size === 0 ? 'All Road Needs' : `${3 - hiddenRoadNeeds.size} of 3 Needs`}
-              <span className="grid-dropdown-arrow">{roadDropdownOpen ? '\u25B2' : '\u25BC'}</span>
-            </button>
-            {roadDropdownOpen && (
-              <div className="grid-dropdown-menu">
-                <label className="grid-dropdown-item grid-dropdown-all">
-                  <input
-                    type="checkbox"
-                    checked={hiddenRoadNeeds.size === 0}
-                    onChange={() => setHiddenRoadNeeds(hiddenRoadNeeds.size === 0 ? new Set(['none', 'road1', 'road2']) : new Set())}
-                  />
-                  All
-                </label>
-                {(['none', 'road1', 'road2'] as RoadNeed[]).map(need => (
-                  <label key={need} className="grid-dropdown-item">
-                    <input type="checkbox" checked={!hiddenRoadNeeds.has(need)} onChange={() => toggleRoadNeed(need)} />
-                    {ROAD_NEED_LABELS[need]}
-                  </label>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="grid-search">
-            <input
-              type="text"
-              placeholder="Search buildings..."
-              value={searchText}
-              onChange={e => setSearchText(e.target.value)}
-              className="grid-search-input"
-            />
-            <button
-              className="grid-dropdown-btn"
-              title="Move all buildings and roads into the staging area"
-              onClick={clearLayout}
-            >
-              Clear Layout
-            </button>
-            <button
-              className="grid-dropdown-btn"
-              title="Reset layout to original positions"
-              onClick={() => {
-                recordHistory();
-                const next = new Map<number, { x: number; y: number }>();
-                for (const b of allBuildings) next.set(b.entry.id, { x: b.x, y: b.y });
-                setPositions(next);
-                setParkedIds(new Set());
-              }}
-            >
-              Reset Layout
-            </button>
-            <button
-              className="grid-dropdown-btn"
-              title={isFullscreen ? "Exit fullscreen" : "Hide top bar and tabs"}
-              onClick={() => onFullscreenChange(!isFullscreen)}
-            >
-              {isFullscreen ? '⛶ Exit Fullscreen' : '⛶ Fullscreen'}
-            </button>
-            <button
-              className="grid-dropdown-btn"
-              title="Run road and Town Hall connectivity validation"
-              onClick={runLayoutValidation}
-            >
-              Validate Layout
-            </button>
-            <button
-              className={`grid-dropdown-btn ${showChangedHighlights ? 'active' : ''}`}
-              title="Highlight map buildings moved from their original positions"
-              onClick={() => setShowChangedHighlights(v => !v)}
-            >
-              {showChangedHighlights ? 'Hide Changes' : 'Identify Changes'}
-            </button>
-            <span className="designer-changes-summary">
-              {changedTotalCount} changed ({parkedIds.size} parked)
+        <div className="grid-toolbar designer-actions">
+          <button
+            className="grid-dropdown-btn designer-icon-btn"
+            title="Clear Layout: move all buildings and roads into Staging Area"
+            onClick={clearLayout}
+            aria-label="Clear Layout"
+          >
+            🧹
+          </button>
+          <button
+            className="grid-dropdown-btn designer-icon-btn"
+            title="Reset Layout: return all items to original city positions"
+            onClick={() => {
+              recordHistory();
+              const next = new Map<number, { x: number; y: number }>();
+              for (const b of allBuildings) next.set(b.entry.id, { x: b.x, y: b.y });
+              setPositions(next);
+              setParkedIds(new Set());
+            }}
+            aria-label="Reset Layout"
+          >
+            ↺
+          </button>
+          <button
+            className="grid-dropdown-btn designer-icon-btn"
+            title={isFullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen'}
+            onClick={() => onFullscreenChange(!isFullscreen)}
+            aria-label={isFullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen'}
+          >
+            ⛶
+          </button>
+          <button
+            className="grid-dropdown-btn designer-icon-btn"
+            title="Validate Layout: check roads, connectivity, and road requirements"
+            onClick={runLayoutValidation}
+            aria-label="Validate Layout"
+          >
+            ✓
+          </button>
+          <button
+            className={`grid-dropdown-btn designer-icon-btn ${showChangedHighlights ? 'active' : ''}`}
+            title={showChangedHighlights ? 'Hide changed location highlights' : 'Identify moved buildings on the map'}
+            onClick={() => setShowChangedHighlights(v => !v)}
+            aria-label={showChangedHighlights ? 'Hide Changes' : 'Identify Changes'}
+          >
+            📍
+          </button>
+          <span className="designer-changes-summary">
+            {changedTotalCount} changed ({parkedIds.size} parked)
+          </span>
+          {validationRan && (
+            <span className={`designer-validation-status ${validationInvalidIds.size > 0 ? 'invalid' : 'valid'}`}>
+              {validationInvalidIds.size > 0
+                ? `${validationInvalidIds.size} invalid`
+                : 'All valid'}
             </span>
-            {validationRan && (
-              <span className={`designer-validation-status ${validationInvalidIds.size > 0 ? 'invalid' : 'valid'}`}>
-                {validationInvalidIds.size > 0
-                  ? `${validationInvalidIds.size} invalid`
-                  : 'All valid'}
-              </span>
-            )}
-          </div>
+          )}
         </div>
       </div>
 
@@ -1631,6 +1574,112 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
                 Order: {parkedSortDirection === 'asc' ? 'Asc' : 'Desc'}
               </button>
             </div>
+          </div>
+          <div className="designer-staging-filters">
+            <div className="grid-dropdown" ref={typeDropdownRef}>
+              <button className="grid-dropdown-btn" onClick={() => setTypeDropdownOpen(v => !v)}>
+                {hiddenTypes.size === 0 ? 'All Types' : `${presentTypes.length - hiddenTypes.size} of ${presentTypes.length} Types`}
+                <span className="grid-dropdown-arrow">{typeDropdownOpen ? '\u25B2' : '\u25BC'}</span>
+              </button>
+              {typeDropdownOpen && (
+                <div className="grid-dropdown-menu">
+                  <label className="grid-dropdown-item grid-dropdown-all">
+                    <input
+                      type="checkbox"
+                      checked={hiddenTypes.size === 0}
+                      onChange={() => setHiddenTypes(hiddenTypes.size === 0 ? new Set(presentTypes) : new Set())}
+                    />
+                    All
+                  </label>
+                  {presentTypes.map(type => (
+                    <label key={type} className="grid-dropdown-item">
+                      <input type="checkbox" checked={!hiddenTypes.has(type)} onChange={() => toggleType(type)} />
+                      <span className="legend-color" style={{ background: getBuildingColor(type) }} />
+                      {TYPE_LABELS[type] ?? type.replace(/_/g, ' ')}
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="grid-dropdown" ref={sizeDropdownRef}>
+              <button className="grid-dropdown-btn" onClick={() => setSizeDropdownOpen(v => !v)}>
+                {hiddenSizes.size === 0 ? 'All Sizes' : `${presentSizes.length - hiddenSizes.size} of ${presentSizes.length} Sizes`}
+                <span className="grid-dropdown-arrow">{sizeDropdownOpen ? '\u25B2' : '\u25BC'}</span>
+              </button>
+              {sizeDropdownOpen && (
+                <div className="grid-dropdown-menu">
+                  <label className="grid-dropdown-item grid-dropdown-all">
+                    <input
+                      type="checkbox"
+                      checked={hiddenSizes.size === 0}
+                      onChange={() => setHiddenSizes(hiddenSizes.size === 0 ? new Set(presentSizes) : new Set())}
+                    />
+                    All
+                  </label>
+                  {presentSizes.map(size => (
+                    <label key={size} className="grid-dropdown-item">
+                      <input type="checkbox" checked={!hiddenSizes.has(size)} onChange={() => toggleSize(size)} />
+                      {size}
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="grid-dropdown" ref={roadDropdownRef}>
+              <button className="grid-dropdown-btn" onClick={() => setRoadDropdownOpen(v => !v)}>
+                {hiddenRoadNeeds.size === 0 ? 'All Road Needs' : `${3 - hiddenRoadNeeds.size} of 3 Needs`}
+                <span className="grid-dropdown-arrow">{roadDropdownOpen ? '\u25B2' : '\u25BC'}</span>
+              </button>
+              {roadDropdownOpen && (
+                <div className="grid-dropdown-menu">
+                  <label className="grid-dropdown-item grid-dropdown-all">
+                    <input
+                      type="checkbox"
+                      checked={hiddenRoadNeeds.size === 0}
+                      onChange={() => setHiddenRoadNeeds(hiddenRoadNeeds.size === 0 ? new Set(['none', 'road1', 'road2']) : new Set())}
+                    />
+                    All
+                  </label>
+                  {(['none', 'road1', 'road2'] as RoadNeed[]).map(need => (
+                    <label key={need} className="grid-dropdown-item">
+                      <input type="checkbox" checked={!hiddenRoadNeeds.has(need)} onChange={() => toggleRoadNeed(need)} />
+                      {ROAD_NEED_LABELS[need]}
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="grid-search">
+              <input
+                type="text"
+                placeholder="Search staged buildings..."
+                value={searchText}
+                onChange={e => setSearchText(e.target.value)}
+                className="grid-search-input"
+              />
+              {searchText.trim().length > 0 && (
+                <button
+                  type="button"
+                  className="grid-search-clear"
+                  title="Clear search text"
+                  aria-label="Clear search text"
+                  onClick={() => setSearchText('')}
+                >
+                  ×
+                </button>
+              )}
+            </div>
+            <button
+              className="grid-dropdown-btn"
+              title="Clear all staging filters and search text"
+              onClick={clearAllFilters}
+              disabled={!hasActiveFilters}
+            >
+              Clear Filters
+            </button>
           </div>
           <p>Drag buildings here to get them out of the way, then drag them back onto the map.</p>
           <div className="designer-metrics">
@@ -1733,8 +1782,12 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
               </g>
             ))}
 
-            {mapBuildings.filter(b => !dragState?.groupIds.includes(b.entry.id)).map(b => (
+            {mapBuildings.filter(b => !dragState?.groupIds.includes(b.entry.id)).map(b => {
+              const fullName = resolveBuildingName(b.entry.cityentity_id, data);
+              const showNameTooltip = b.entry.type !== 'street' && isLabelLikelyClipped(fullName, b.width, b.length);
+              return (
               <g key={b.entry.id}>
+                {showNameTooltip && <title>{fullName}</title>}
                 {(() => {
                   const isSelected = selectedIds.has(b.entry.id);
                   const isInvalid = validationInvalidIds.has(b.entry.id);
@@ -1811,12 +1864,13 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
                         wordBreak: 'break-word',
                       }}
                     >
-                      {resolveBuildingName(b.entry.cityentity_id, data)}
+                      {fullName}
                     </div>
                   </foreignObject>
                 )}
               </g>
-            ))}
+              );
+            })}
 
             {selectionRegion && (() => {
               const minX = Math.min(selectionRegion.start.x, selectionRegion.end.x);

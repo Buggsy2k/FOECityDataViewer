@@ -1200,20 +1200,56 @@ body {
   flex-wrap: wrap;
 }
 
+.designer-actions {
+  margin-left: auto;
+  justify-content: flex-end;
+}
+
+.grid-toolbar.designer-actions .designer-icon-btn {
+  min-width: 34px;
+  width: 34px;
+  max-width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  padding: 0;
+  justify-content: center;
+  font-size: 1rem;
+  line-height: 1;
+}
+
 .grid-search {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 0.5rem;
+  position: relative;
 }
 
 .grid-search-input {
   width: 220px;
-  padding: 0.4rem 0.7rem;
+  padding: 0.4rem 1.8rem 0.4rem 0.7rem;
   background: var(--bg-primary);
   border: 1px solid var(--border);
   border-radius: 6px;
   color: var(--text-primary);
   font-size: 0.82rem;
+}
+
+.grid-search-clear {
+  position: absolute;
+  right: 0.45rem;
+  top: 50%;
+  transform: translateY(-50%);
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0;
+}
+
+.grid-search-clear:hover {
+  color: var(--text-primary);
 }
 
 .grid-search-input:focus {
@@ -1374,6 +1410,19 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
+}
+
+.designer-staging-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: center;
+  margin-top: 0.55rem;
+}
+
+.designer-staging-filters .grid-search-input {
+  width: 100%;
+  min-width: 180px;
 }
 
 .designer-sort-btn {
