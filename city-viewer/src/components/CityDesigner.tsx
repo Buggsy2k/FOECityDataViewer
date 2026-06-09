@@ -26,6 +26,7 @@ interface DragState {
   originParked: boolean;
   groupIds: number[];
   groupOffsets: Record<number, { dx: number; dy: number }>;
+  startPointer?: { x: number; y: number };
   pointer: { x: number; y: number };
   overPanel: boolean;
   candidate: { x: number; y: number } | null;
@@ -675,6 +676,17 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
         return;
       }
 
+      // Treat tiny mouse movement as a click-cancel for map drags.
+      if (!dragState.originParked && dragState.startPointer) {
+        const dx = dragState.pointer.x - dragState.startPointer.x;
+        const dy = dragState.pointer.y - dragState.startPointer.y;
+        if (Math.hypot(dx, dy) <= 5) {
+          setDragState(null);
+          setIsPanning(false);
+          return;
+        }
+      }
+
       // ── Street tool (staged roads): click-to-start, click-to-commit line ──
       if (dragState.isStreet && dragState.originParked) {
         if (dragState.overPanel) {
@@ -1078,6 +1090,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
       originParked: isParked,
       groupIds: uniqueGroupIds,
       groupOffsets,
+      startPointer: { x: e.clientX, y: e.clientY },
       pointer: { x: e.clientX, y: e.clientY },
       overPanel: false,
       candidate,
