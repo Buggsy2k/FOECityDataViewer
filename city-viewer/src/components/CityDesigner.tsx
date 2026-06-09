@@ -54,6 +54,7 @@ interface ParkedStack {
   roadNeed: RoadNeed;
   type: string;
   count: number;
+  isPlaceholder: boolean;
 }
 
 interface LayoutSnapshot {
@@ -66,7 +67,16 @@ interface SelectionRegion {
   end: { x: number; y: number };
 }
 
+interface PlaceholderTemplate {
+  id: number;
+  name: string;
+  width: number;
+  length: number;
+  roadNeed: RoadNeed;
+}
+
 const LAYOUT_STORAGE_KEY = 'foe-city-designer-layouts-v1';
+const PLACEHOLDER_STORAGE_KEY = 'foe-city-designer-placeholders-v1';
 
 const TYPE_LABELS: Record<string, string> = {
   main_building: 'Main Building',
@@ -89,6 +99,7 @@ const ROAD_NEED_LABELS: Record<RoadNeed, string> = {
 };
 
 const INHERENT_NO_ROAD_TYPES = new Set(['street', 'main_building', 'tower', 'hub_main', 'hub_part', 'decoration']);
+const PLACEHOLDER_BASE_COLOR = '#19c5e8';
 
 function pointInRect(x: number, y: number, rect: DOMRect): boolean {
   return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
@@ -142,6 +153,21 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
       return [];
     }
   });
+  const [placeholderTemplates, setPlaceholderTemplates] = useState<PlaceholderTemplate[]>(() => {
+    try {
+      const raw = localStorage.getItem(PLACEHOLDER_STORAGE_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw) as PlaceholderTemplate[];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  });
+  const [placeholderName, setPlaceholderName] = useState('');
+  const [placeholderWidth, setPlaceholderWidth] = useState(2);
+  const [placeholderLength, setPlaceholderLength] = useState(2);
+  const [placeholderRoadNeed, setPlaceholderRoadNeed] = useState<RoadNeed>('none');
+  const [includedPlaceholderIds, setIncludedPlaceholderIds] = useState<Set<number>>(new Set());
 
   const [typeDropdownOpen, setTypeDropdownOpen] = useState(false);
   const [sizeDropdownOpen, setSizeDropdownOpen] = useState(false);
@@ -149,6 +175,12 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
   const typeDropdownRef = useRef<HTMLDivElement>(null);
   const sizeDropdownRef = useRef<HTMLDivElement>(null);
   const roadDropdownRef = useRef<HTMLDivElement>(null);
+
+  const placeholderById = useMemo(() => {
+    const map = new Map<number, PlaceholderTemplate>();
+    for (const tpl of placeholderTemplates) map.set(tpl.id, tpl);
+    return map;
+  }, [placeholderTemplates]);
 
   const getRoadNeed = useCallback((b: PlacedBuilding): RoadNeed => {
     if (INHERENT_NO_ROAD_TYPES.has(b.entry.type)) return 'none';
@@ -169,6 +201,13 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
   }, [data]);
 
   const getRequiredStreetLevelFor = useCallback((b: DesignerBuilding): number => {
+    const placeholder = placeholderById.get(b.entry.id);
+    if (placeholder) {
+      if (placeholder.roadNeed === 'road2') return 2;
+      if (placeholder.roadNeed === 'road1') return 1;
+      return 0;
+    }
+
     const entity = data?.CityEntities?.[b.entry.cityentity_id];
     const rootLevel = entity?.requirements?.street_connection_level ?? 0;
     let componentLevel = 0;
@@ -178,9 +217,22 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
       if (level > componentLevel) componentLevel = level;
     }
     return Math.max(rootLevel, componentLevel);
-  }, [data]);
+  }, [data, placeholderById]);
 
-  const allBuildings = useMemo<DesignerBuilding[]>(() => {
+  const getDesignerBuildingName = useCallback((b: DesignerBuilding): string => {
+    const placeholder = placeholderById.get(b.entry.id);
+    if (placeholder) return placeholder.name;
+    if (!data) return b.entry.cityentity_id;
+    return resolveBuildingName(b.entry.cityentity_id, data);
+  }, [placeholderById, data]);
+
+  const getDesignerBuildingEra = useCallback((b: DesignerBuilding): string => {
+    if (placeholderById.has(b.entry.id)) return 'Custom';
+    if (!data) return 'Unknown';
+    return extractEra(b.entry.cityentity_id, data, b.entry.level);
+  }, [placeholderById, data]);
+
+  const baseBuildings = useMemo<DesignerBuilding[]>(() => {
     if (!data) return [];
     return getPlacedBuildings(data).map((b) => ({
       ...b,
@@ -188,6 +240,34 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
       roadNeed: getRoadNeed(b),
     }));
   }, [data, getRoadNeed]);
+
+  const customBuildings = useMemo<DesignerBuilding[]>(() => {
+    return placeholderTemplates
+      .filter(tpl => includedPlaceholderIds.has(tpl.id))
+      .map((tpl) => ({
+      entry: {
+        id: tpl.id,
+        player_id: 0,
+        cityentity_id: `__placeholder__${tpl.id}`,
+        type: 'generic_building',
+        x: 0,
+        y: 0,
+        level: 0,
+        bonuses: [],
+        state: {},
+      },
+      x: 0,
+      y: 0,
+      width: tpl.width,
+      length: tpl.length,
+      sizeKey: `${tpl.width}x${tpl.length}`,
+      roadNeed: tpl.roadNeed,
+    }));
+  }, [placeholderTemplates, includedPlaceholderIds]);
+
+  const allBuildings = useMemo<DesignerBuilding[]>(() => {
+    return [...baseBuildings, ...customBuildings];
+  }, [baseBuildings, customBuildings]);
 
   const buildingById = useMemo(() => {
     const map = new Map<number, DesignerBuilding>();
@@ -238,14 +318,33 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
   }, []);
 
   useEffect(() => {
-    const next = new Map<number, { x: number; y: number }>();
-    for (const b of allBuildings) next.set(b.entry.id, { x: b.x, y: b.y });
-    setPositions(next);
-    setParkedIds(new Set());
-    setSelectedIds(new Set());
-    setSelectionRegion(null);
-    setViewBox(null);
-    historyRef.current = [];
+    const allIds = new Set(allBuildings.map(b => b.entry.id));
+    setPositions(prev => {
+      const next = new Map<number, { x: number; y: number }>();
+      for (const b of allBuildings) {
+        next.set(b.entry.id, prev.get(b.entry.id) ?? { x: b.x, y: b.y });
+      }
+      return next;
+    });
+
+    setParkedIds(prev => {
+      const next = new Set<number>();
+      for (const b of allBuildings) {
+        const id = b.entry.id;
+        if (prev.has(id)) {
+          next.add(id);
+        }
+      }
+      return next;
+    });
+
+    setSelectedIds(prev => {
+      const next = new Set<number>();
+      prev.forEach(id => {
+        if (allIds.has(id)) next.add(id);
+      });
+      return next;
+    });
   }, [allBuildings]);
 
   useEffect(() => {
@@ -286,8 +385,8 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
     if (hiddenSizes.has(b.sizeKey)) return false;
     if (hiddenRoadNeeds.has(b.roadNeed)) return false;
     if (!searchText.trim()) return true;
-    return resolveBuildingName(b.entry.cityentity_id, data).toLowerCase().includes(searchText.toLowerCase());
-  }, [hiddenTypes, hiddenSizes, hiddenRoadNeeds, searchText, data]);
+    return getDesignerBuildingName(b).toLowerCase().includes(searchText.toLowerCase());
+  }, [hiddenTypes, hiddenSizes, hiddenRoadNeeds, searchText, data, getDesignerBuildingName]);
 
   const mapBuildings = useMemo(() => {
     return allBuildings
@@ -616,6 +715,10 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
       let valid = candidate ? canPlaceRef.current(dragId, candidate.x, candidate.y) : false;
       let lineCells: LineCell[] | null = null;
 
+      if (dragState.isStreet && dragState.originParked && candidate) {
+        valid = canPlaceGeometryRef.current(dragId, candidate.x, candidate.y);
+      }
+
       // Road line mode: only after a start cell is locked by click.
       if (dragState.isStreet && dragState.originParked && dragState.startGrid && dragState.lineIds.length > 0) {
         const sg = dragState.startGrid;
@@ -642,12 +745,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
             if (lineId == null) continue;
             lineOverrides.set(lineId, { x: cx, y: cy });
             forcedPlacedIds.add(lineId);
-            const validLineSegment = canPlaceGeometryRef.current(lineId, cx, cy)
-              && validateRoadRulesRef.current(
-                [lineId],
-                lineOverrides,
-                forcedPlacedIds
-              );
+            const validLineSegment = canPlaceGeometryRef.current(lineId, cx, cy);
             lineCells.push({ x: cx, y: cy, valid: validLineSegment });
           }
 
@@ -771,7 +869,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
               pointer: { x: mx, y: my },
               overPanel: false,
               candidate: cg,
-              valid: !!cg && canPlaceRef.current(remaining[0], cg.x, cg.y),
+              valid: !!cg && canPlaceGeometryRef.current(remaining[0], cg.x, cg.y),
               startGrid: null,
               cityentityId: dragState.cityentityId,
               isStreet: true,
@@ -939,6 +1037,10 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
   }, [savedLayouts]);
 
   useEffect(() => {
+    localStorage.setItem(PLACEHOLDER_STORAGE_KEY, JSON.stringify(placeholderTemplates));
+  }, [placeholderTemplates]);
+
+  useEffect(() => {
     const isEditableTarget = (target: EventTarget | null): boolean => {
       if (!(target instanceof HTMLElement)) return false;
       const tag = target.tagName;
@@ -1095,7 +1197,9 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
       overPanel: false,
       candidate,
       valid: !!candidate && (isParked
-        ? canPlaceRef.current(buildingId, candidate.x, candidate.y)
+        ? (isStreet
+          ? canPlaceGeometryRef.current(buildingId, candidate.x, candidate.y)
+          : canPlaceRef.current(buildingId, candidate.x, candidate.y))
         : canPlaceGroup({
           id: buildingId,
           origin,
@@ -1262,6 +1366,77 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
     hiddenRoadNeeds.size > 0 ||
     searchText.trim().length > 0;
 
+  const createPlaceholder = useCallback(() => {
+    const name = placeholderName.trim();
+    if (!name) return;
+    const width = Math.max(1, Math.floor(placeholderWidth));
+    const length = Math.max(1, Math.floor(placeholderLength));
+    const existingIds = new Set<number>([
+      ...baseBuildings.map(b => b.entry.id),
+      ...placeholderTemplates.map(t => t.id),
+    ]);
+    let nextId = Date.now();
+    while (existingIds.has(nextId)) nextId += 1;
+    const tpl: PlaceholderTemplate = {
+      id: nextId,
+      name,
+      width,
+      length,
+      roadNeed: placeholderRoadNeed,
+    };
+    setPlaceholderTemplates(prev => [tpl, ...prev]);
+    setPlaceholderName('');
+  }, [placeholderName, placeholderWidth, placeholderLength, placeholderRoadNeed, baseBuildings, placeholderTemplates]);
+
+  const includePlaceholder = useCallback((id: number) => {
+    setIncludedPlaceholderIds(prev => {
+      if (prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
+    setPositions(prev => {
+      const next = new Map(prev);
+      if (!next.has(id)) next.set(id, { x: 0, y: 0 });
+      return next;
+    });
+    setParkedIds(prev => {
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
+  }, []);
+
+  const removePlaceholderFromCurrent = useCallback((id: number) => {
+    setIncludedPlaceholderIds(prev => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+    setPositions(prev => {
+      const next = new Map(prev);
+      next.delete(id);
+      return next;
+    });
+    setParkedIds(prev => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+    if (dragState?.id === id) setDragState(null);
+  }, [dragState]);
+
+  const deletePlaceholder = useCallback((id: number) => {
+    setPlaceholderTemplates(prev => prev.filter(p => p.id !== id));
+    removePlaceholderFromCurrent(id);
+  }, [removePlaceholderFromCurrent]);
+
   const parkBuilding = useCallback((buildingId: number) => {
     if (parkedIdsRef.current.has(buildingId)) return;
     recordHistory();
@@ -1364,10 +1539,47 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
     const layout = savedLayouts.find(l => l.name === layoutName);
     if (!layout) return;
 
+    const placeholderTemplateIds = new Set(placeholderTemplates.map(t => t.id));
+    const loadedPlaceholderIds = new Set<number>();
+    for (const p of layout.placements) {
+      if (placeholderTemplateIds.has(p.id)) loadedPlaceholderIds.add(p.id);
+    }
+
+    setIncludedPlaceholderIds(prev => {
+      const next = new Set(prev);
+      loadedPlaceholderIds.forEach(id => next.add(id));
+      return next;
+    });
+
     const map = new Map<number, { x: number; y: number }>();
     const parked = new Set<number>();
 
-    for (const b of allBuildings) {
+    const activeBuildings: DesignerBuilding[] = [
+      ...baseBuildings,
+      ...placeholderTemplates
+        .filter(tpl => loadedPlaceholderIds.has(tpl.id))
+        .map((tpl) => ({
+          entry: {
+            id: tpl.id,
+            player_id: 0,
+            cityentity_id: `__placeholder__${tpl.id}`,
+            type: 'generic_building',
+            x: 0,
+            y: 0,
+            level: 0,
+            bonuses: [],
+            state: {},
+          },
+          x: 0,
+          y: 0,
+          width: tpl.width,
+          length: tpl.length,
+          sizeKey: `${tpl.width}x${tpl.length}`,
+          roadNeed: tpl.roadNeed,
+        })),
+    ];
+
+    for (const b of activeBuildings) {
       const match = layout.placements.find(p => p.id === b.entry.id);
       if (match) {
         map.set(b.entry.id, { x: match.x, y: match.y });
@@ -1380,7 +1592,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
     recordHistory();
     setPositions(map);
     setParkedIds(parked);
-  }, [savedLayouts, allBuildings, recordHistory]);
+  }, [savedLayouts, baseBuildings, placeholderTemplates, recordHistory]);
 
   const exportLayout = useCallback((layoutName: string) => {
     const layout = savedLayouts.find(l => l.name === layoutName);
@@ -1415,8 +1627,8 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
       if (!parkedIds.has(building.entry.id)) continue;
       if (!matchesFilters(building)) continue;
 
-      const name = resolveBuildingName(building.entry.cityentity_id, data);
-      const era = extractEra(building.entry.cityentity_id, data, building.entry.level);
+      const name = getDesignerBuildingName(building);
+      const era = getDesignerBuildingEra(building);
       const key = `${building.entry.cityentity_id}::${era}`;
       const existing = grouped.get(key);
 
@@ -1435,6 +1647,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
         roadNeed: building.roadNeed,
         type: building.entry.type,
         count: 1,
+        isPlaceholder: placeholderById.has(building.entry.id),
       });
     }
 
@@ -1450,7 +1663,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
       }
       return (a.name.localeCompare(b.name) || a.era.localeCompare(b.era)) * direction;
     });
-  }, [allBuildings, parkedIds, matchesFilters, data, parkedSortMode, parkedSortDirection]);
+  }, [allBuildings, parkedIds, matchesFilters, data, parkedSortMode, parkedSortDirection, getDesignerBuildingName, getDesignerBuildingEra, placeholderById]);
 
   const movedOnMapIds = useMemo(() => {
     const ids = new Set<number>();
@@ -1682,6 +1895,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
             </button>
           </div>
           <p>Drag buildings here to get them out of the way, then drag them back onto the map.</p>
+
           <div className="designer-metrics">
             <div><strong>{parkedIds.size}</strong> parked</div>
             <div><strong>{placedCount}</strong> on map</div>
@@ -1705,7 +1919,15 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
                   }}
                   title="Click to pick up and place, click again to unselect, or click another item to switch"
                 >
-                  <span className="designer-item-color" style={{ background: getBuildingColor(stack.type) }} />
+                  <span
+                    className="designer-item-color"
+                    style={stack.isPlaceholder
+                      ? {
+                        backgroundColor: PLACEHOLDER_BASE_COLOR,
+                        backgroundImage: 'repeating-linear-gradient(45deg, rgba(0,0,0,0.7) 0 3px, rgba(255,255,255,0.25) 3px 6px)',
+                      }
+                      : { background: getBuildingColor(stack.type) }}
+                  />
                   <span className="designer-item-name">{stack.name}</span>
                   <span className="designer-item-count">x{stack.count}</span>
                   <span className="designer-item-meta">{stack.era} | {stack.sizeKey} | {ROAD_NEED_LABELS[stack.roadNeed]}</span>
@@ -1740,6 +1962,75 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
               ))}
             </div>
           </div>
+
+          <div className="designer-placeholder-box">
+            <div className="designer-placeholder-title">Custom Placeholders</div>
+            <div className="designer-placeholder-form">
+              <input
+                type="text"
+                value={placeholderName}
+                placeholder="Placeholder name"
+                className="designer-placeholder-name"
+                onChange={e => setPlaceholderName(e.target.value)}
+              />
+              <div className="designer-placeholder-size">
+                <input
+                  type="number"
+                  min={1}
+                  value={placeholderWidth}
+                  className="designer-small-input"
+                  onChange={e => setPlaceholderWidth(Math.max(1, Number(e.target.value) || 1))}
+                  title="Width"
+                />
+                <span className="designer-x-sep">x</span>
+                <input
+                  type="number"
+                  min={1}
+                  value={placeholderLength}
+                  className="designer-small-input"
+                  onChange={e => setPlaceholderLength(Math.max(1, Number(e.target.value) || 1))}
+                  title="Length"
+                />
+              </div>
+              <select
+                className="designer-road-select"
+                value={placeholderRoadNeed}
+                onChange={e => setPlaceholderRoadNeed(e.target.value as RoadNeed)}
+                title="Road Need"
+              >
+                <option value="none">No Road</option>
+                <option value="road1">1x1 Road</option>
+                <option value="road2">2x2 Road</option>
+              </select>
+              <button className="grid-dropdown-btn" onClick={createPlaceholder} disabled={!placeholderName.trim()}>
+                Add Placeholder
+              </button>
+            </div>
+            {placeholderTemplates.length > 0 && (
+              <div className="designer-placeholder-list">
+                {placeholderTemplates.map(tpl => (
+                  <div key={tpl.id} className="designer-placeholder-row">
+                    <span>{tpl.name} ({tpl.width}x{tpl.length}, {ROAD_NEED_LABELS[tpl.roadNeed]})</span>
+                    <div className="designer-placeholder-actions">
+                      {includedPlaceholderIds.has(tpl.id) ? (
+                        <button className="designer-mini-btn" onClick={() => removePlaceholderFromCurrent(tpl.id)}>
+                          Remove
+                        </button>
+                      ) : (
+                        <button className="designer-mini-btn" onClick={() => includePlaceholder(tpl.id)}>
+                          Add to Staging
+                        </button>
+                      )}
+                      <button className="designer-mini-btn danger" onClick={() => deletePlaceholder(tpl.id)}>Delete</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {placeholderTemplates.length === 0 && (
+              <div className="designer-empty">No custom placeholders yet.</div>
+            )}
+          </div>
         </aside>
 
         <div
@@ -1760,6 +2051,10 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
             <defs>
               <pattern id="designer-grid-1x1" width={CELL_SIZE} height={CELL_SIZE} patternUnits="userSpaceOnUse">
                 <rect width={CELL_SIZE} height={CELL_SIZE} fill="none" stroke="#2a2a4e" strokeWidth={0.3} />
+              </pattern>
+              <pattern id="designer-placeholder-pattern" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                <rect width="8" height="8" fill={PLACEHOLDER_BASE_COLOR} />
+                <rect width="3" height="8" fill="rgba(0,0,0,0.7)" />
               </pattern>
             </defs>
 
@@ -1783,7 +2078,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
             ))}
 
             {mapBuildings.filter(b => !dragState?.groupIds.includes(b.entry.id)).map(b => {
-              const fullName = resolveBuildingName(b.entry.cityentity_id, data);
+              const fullName = getDesignerBuildingName(b);
               const showNameTooltip = b.entry.type !== 'street' && isLabelLikelyClipped(fullName, b.width, b.length);
               return (
               <g key={b.entry.id}>
@@ -1791,6 +2086,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
                 {(() => {
                   const isSelected = selectedIds.has(b.entry.id);
                   const isInvalid = validationInvalidIds.has(b.entry.id);
+                  const isPlaceholder = placeholderById.has(b.entry.id);
                   const isChangedLocation = showChangedHighlights && movedOnMapIds.has(b.entry.id);
                   const strokeColor = isInvalid
                     ? 'rgba(231, 76, 60, 0.98)'
@@ -1806,8 +2102,8 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
                   y={b.y * CELL_SIZE + 0.5}
                   width={b.width * CELL_SIZE - 1}
                   height={b.length * CELL_SIZE - 1}
-                  fill={getBuildingColor(b.entry.type)}
-                  opacity={0.85}
+                  fill={isPlaceholder ? 'url(#designer-placeholder-pattern)' : getBuildingColor(b.entry.type)}
+                  opacity={isPlaceholder ? 0.96 : 0.85}
                   stroke={strokeColor}
                   strokeWidth={strokeW}
                   rx={1}
@@ -1970,14 +2266,23 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
       {dragState?.originParked && (() => {
         const b = buildingById.get(dragState.id);
         if (!b) return null;
-        const name = resolveBuildingName(b.entry.cityentity_id, data);
+        const name = getDesignerBuildingName(b);
+        const isPlaceholder = placeholderById.has(b.entry.id);
         const color = getBuildingColor(b.entry.type);
         return (
           <div
             className="designer-drag-ghost"
             style={{ left: dragState.pointer.x + 14, top: dragState.pointer.y + 14 }}
           >
-            <span className="designer-drag-ghost-swatch" style={{ background: color }} />
+            <span
+              className="designer-drag-ghost-swatch"
+              style={isPlaceholder
+                ? {
+                  backgroundColor: PLACEHOLDER_BASE_COLOR,
+                  backgroundImage: 'repeating-linear-gradient(45deg, rgba(0,0,0,0.7) 0 3px, rgba(255,255,255,0.25) 3px 6px)',
+                }
+                : { background: color }}
+            />
             <span className="designer-drag-ghost-label">{name}</span>
             <span className="designer-drag-ghost-size">{b.width}×{b.length}</span>
           </div>
