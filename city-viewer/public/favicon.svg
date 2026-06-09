@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="City Layout Favicon">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#111426"/>
+      <stop offset="1" stop-color="#1f2a4b"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ff9f1c"/>
+      <stop offset="1" stop-color="#ffd166"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="2" y="2" width="60" height="60" rx="12" fill="url(#bg)"/>
+
+  <g stroke="#2d3a63" stroke-width="1" opacity="0.55">
+    <path d="M10 18h44M10 26h44M10 34h44M10 42h44M10 50h44"/>
+    <path d="M18 10v44M26 10v44M34 10v44M42 10v44M50 10v44"/>
+  </g>
+
+  <g fill="url(#accent)">
+    <rect x="14" y="36" width="8" height="14" rx="1.5"/>
+    <rect x="25" y="30" width="9" height="20" rx="1.5"/>
+    <rect x="37" y="24" width="12" height="26" rx="1.5"/>
+    <rect x="41" y="16" width="4" height="8" rx="1"/>
+  </g>
+
+  <path d="M12 52h40" stroke="#f8f9ff" stroke-opacity="0.9" stroke-width="2" stroke-linecap="round"/>
+</svg>

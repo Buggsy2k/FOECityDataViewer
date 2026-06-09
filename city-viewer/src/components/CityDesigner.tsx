@@ -119,11 +119,16 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
   const [parkedIds, setParkedIds] = useState<Set<number>>(new Set());
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [selectionRegion, setSelectionRegion] = useState<SelectionRegion | null>(null);
+  const [validationInvalidIds, setValidationInvalidIds] = useState<Set<number>>(new Set());
+  const [validationRan, setValidationRan] = useState(false);
+  const validatedPositionsRef = useRef<Map<number, { x: number; y: number }> | null>(null);
+  const validatedParkedIdsRef = useRef<Set<number> | null>(null);
 
   const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set());
   const [hiddenSizes, setHiddenSizes] = useState<Set<string>>(new Set());
   const [hiddenRoadNeeds, setHiddenRoadNeeds] = useState<Set<RoadNeed>>(new Set());
   const [searchText, setSearchText] = useState('');
+  const [showChangedHighlights, setShowChangedHighlights] = useState(false);
   const [parkedSortMode, setParkedSortMode] = useState<ParkedSortMode>('name');
   const [parkedSortDirection, setParkedSortDirection] = useState<SortDirection>('asc');
   const [savedLayouts, setSavedLayouts] = useState<SavedLayout[]>(() => {
@@ -160,6 +165,18 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
     if (requiredLevel >= 2) return 'road2';
     if (requiredLevel === 1) return 'road1';
     return 'none';
+  }, [data]);
+
+  const getRequiredStreetLevelFor = useCallback((b: DesignerBuilding): number => {
+    const entity = data?.CityEntities?.[b.entry.cityentity_id];
+    const rootLevel = entity?.requirements?.street_connection_level ?? 0;
+    let componentLevel = 0;
+    for (const comp of Object.values(entity?.components ?? {})) {
+      const level = (comp as { streetConnectionRequirement?: { requiredLevel?: number } })
+        ?.streetConnectionRequirement?.requiredLevel ?? 0;
+      if (level > componentLevel) componentLevel = level;
+    }
+    return Math.max(rootLevel, componentLevel);
   }, [data]);
 
   const allBuildings = useMemo<DesignerBuilding[]>(() => {
@@ -280,7 +297,182 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
       });
   }, [allBuildings, parkedIds, positions]);
 
-  const canPlace = useCallback((id: number, x: number, y: number): boolean => {
+  const computeRoadConnectivity = useCallback((placed: DesignerBuilding[]) => {
+    const streetByCellAny = new Map<string, number>();
+    const streetByCell2x2 = new Map<string, number>();
+    const streetNeighborsAny = new Map<number, Set<number>>();
+    const streetNeighbors2x2 = new Map<number, Set<number>>();
+    const street2x2Ids = new Set<number>();
+    const connectedStreetIdsAny = new Set<number>();
+    const connectedStreetIds2x2 = new Set<number>();
+    const connectedBuildingIdsAny = new Set<number>();
+    const connectedBuildingIds2x2 = new Set<number>();
+    const mainBuilding = placed.find(b => b.entry.type === 'main_building') ?? null;
+
+    const isTwoByTwoStreet = (building: DesignerBuilding): boolean => (
+      building.entry.type === 'street' && building.width === 2 && building.length === 2
+    );
+
+    const getEdgeCells = (building: DesignerBuilding): string[] => {
+      const edgeCells: string[] = [];
+      for (let dx = -1; dx <= building.width; dx++) {
+        for (let dy = -1; dy <= building.length; dy++) {
+          const onEdge = dx === -1 || dx === building.width || dy === -1 || dy === building.length;
+          const isCorner = (dx === -1 || dx === building.width) && (dy === -1 || dy === building.length);
+          if (!onEdge || isCorner) continue;
+          edgeCells.push(`${building.x + dx},${building.y + dy}`);
+        }
+      }
+      return edgeCells;
+    };
+
+    for (const building of placed) {
+      if (building.entry.type !== 'street') continue;
+      streetNeighborsAny.set(building.entry.id, new Set());
+      if (isTwoByTwoStreet(building)) {
+        street2x2Ids.add(building.entry.id);
+        streetNeighbors2x2.set(building.entry.id, new Set());
+      }
+      for (let dx = 0; dx < building.width; dx++) {
+        for (let dy = 0; dy < building.length; dy++) {
+          const key = `${building.x + dx},${building.y + dy}`;
+          streetByCellAny.set(key, building.entry.id);
+          if (isTwoByTwoStreet(building)) {
+            streetByCell2x2.set(key, building.entry.id);
+          }
+        }
+      }
+    }
+
+    for (const building of placed) {
+      if (building.entry.type !== 'street') continue;
+      const neighborsAny = streetNeighborsAny.get(building.entry.id);
+      if (!neighborsAny) continue;
+      for (const cell of getEdgeCells(building)) {
+        const neighborAnyId = streetByCellAny.get(cell);
+        if (neighborAnyId != null && neighborAnyId !== building.entry.id) {
+          neighborsAny.add(neighborAnyId);
+        }
+
+        if (street2x2Ids.has(building.entry.id)) {
+          const neighbors2x2 = streetNeighbors2x2.get(building.entry.id);
+          const neighbor2x2Id = streetByCell2x2.get(cell);
+          if (neighbors2x2 && neighbor2x2Id != null && neighbor2x2Id !== building.entry.id) {
+            neighbors2x2.add(neighbor2x2Id);
+          }
+        }
+      }
+    }
+
+    const queueAny: number[] = [];
+    const queue2x2: number[] = [];
+    if (mainBuilding) {
+      for (const cell of getEdgeCells(mainBuilding)) {
+        const anyStreetId = streetByCellAny.get(cell);
+        if (anyStreetId != null && !connectedStreetIdsAny.has(anyStreetId)) {
+          connectedStreetIdsAny.add(anyStreetId);
+          queueAny.push(anyStreetId);
+        }
+
+        const street2x2Id = streetByCell2x2.get(cell);
+        if (street2x2Id != null && !connectedStreetIds2x2.has(street2x2Id)) {
+          connectedStreetIds2x2.add(street2x2Id);
+          queue2x2.push(street2x2Id);
+        }
+      }
+    }
+
+    while (queueAny.length > 0) {
+      const streetId = queueAny.shift();
+      if (streetId == null) continue;
+      for (const neighborStreetId of streetNeighborsAny.get(streetId) ?? []) {
+        if (connectedStreetIdsAny.has(neighborStreetId)) continue;
+        connectedStreetIdsAny.add(neighborStreetId);
+        queueAny.push(neighborStreetId);
+      }
+    }
+
+    while (queue2x2.length > 0) {
+      const streetId = queue2x2.shift();
+      if (streetId == null) continue;
+      for (const neighborStreetId of streetNeighbors2x2.get(streetId) ?? []) {
+        if (connectedStreetIds2x2.has(neighborStreetId)) continue;
+        connectedStreetIds2x2.add(neighborStreetId);
+        queue2x2.push(neighborStreetId);
+      }
+    }
+
+    for (const building of placed) {
+      if (building.entry.type === 'street') continue;
+      const requiredStreetLevel = getRequiredStreetLevelFor(building);
+      for (const cell of getEdgeCells(building)) {
+        const anyStreetId = streetByCellAny.get(cell);
+        if (anyStreetId != null && connectedStreetIdsAny.has(anyStreetId)) {
+          connectedBuildingIdsAny.add(building.entry.id);
+        }
+
+        if (requiredStreetLevel >= 2) {
+          const street2x2Id = streetByCell2x2.get(cell);
+          if (street2x2Id != null && connectedStreetIds2x2.has(street2x2Id)) {
+            connectedBuildingIds2x2.add(building.entry.id);
+          }
+        }
+
+        if (requiredStreetLevel < 2 && connectedBuildingIdsAny.has(building.entry.id)) break;
+        if (requiredStreetLevel >= 2 && connectedBuildingIds2x2.has(building.entry.id)) break;
+      }
+    }
+
+    return {
+      connectedStreetIdsAny,
+      connectedBuildingIdsAny,
+      connectedBuildingIds2x2,
+    };
+  }, [getRequiredStreetLevelFor]);
+
+  const validateRoadRules = useCallback((
+    targetIds: number[],
+    overrides: Map<number, { x: number; y: number }>,
+    forcedPlacedIds: Set<number>
+  ): boolean => {
+    const placed: DesignerBuilding[] = [];
+    for (const b of allBuildings) {
+      if (parkedIds.has(b.entry.id) && !forcedPlacedIds.has(b.entry.id)) continue;
+      const p = overrides.get(b.entry.id) ?? positions.get(b.entry.id) ?? { x: b.x, y: b.y };
+      placed.push({ ...b, x: p.x, y: p.y });
+    }
+
+    const placedById = new Map<number, DesignerBuilding>();
+    for (const b of placed) placedById.set(b.entry.id, b);
+
+    const connectivity = computeRoadConnectivity(placed);
+
+    for (const id of targetIds) {
+      const building = placedById.get(id);
+      if (!building) return false;
+
+      if (building.entry.type === 'street') {
+        if (!connectivity.connectedStreetIdsAny.has(id)) return false;
+        continue;
+      }
+
+      const requiredStreetLevel = getRequiredStreetLevelFor(building);
+      const needsRoad = !INHERENT_NO_ROAD_TYPES.has(building.entry.type) && requiredStreetLevel > 0;
+
+      if (needsRoad) {
+        const isConnected = requiredStreetLevel >= 2
+          ? connectivity.connectedBuildingIds2x2.has(id)
+          : connectivity.connectedBuildingIdsAny.has(id);
+        if (!isConnected) return false;
+      } else if (!INHERENT_NO_ROAD_TYPES.has(building.entry.type)) {
+        if (connectivity.connectedBuildingIdsAny.has(id)) return false;
+      }
+    }
+
+    return true;
+  }, [allBuildings, parkedIds, positions, computeRoadConnectivity, getRequiredStreetLevelFor]);
+
+  const canPlaceGeometry = useCallback((id: number, x: number, y: number): boolean => {
     const current = buildingById.get(id);
     if (!current) return false;
 
@@ -302,10 +494,24 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
     return true;
   }, [buildingById, unlockedCells, allBuildings, parkedIds, positions]);
 
+  const canPlace = useCallback((id: number, x: number, y: number): boolean => {
+    if (!canPlaceGeometry(id, x, y)) return false;
+
+    const overrides = new Map<number, { x: number; y: number }>();
+    overrides.set(id, { x, y });
+    return validateRoadRules([id], overrides, new Set([id]));
+  }, [canPlaceGeometry, validateRoadRules]);
+
   // Keep a ref so the drag effect always calls the latest canPlace/screenToGrid
   // without needing to re-subscribe every time positions/parkedIds change.
+  const canPlaceGeometryRef = useRef(canPlaceGeometry);
+  useEffect(() => { canPlaceGeometryRef.current = canPlaceGeometry; }, [canPlaceGeometry]);
+
   const canPlaceRef = useRef(canPlace);
   useEffect(() => { canPlaceRef.current = canPlace; }, [canPlace]);
+
+  const validateRoadRulesRef = useRef(validateRoadRules);
+  useEffect(() => { validateRoadRulesRef.current = validateRoadRules; }, [validateRoadRules]);
 
   const allBuildingsRef = useRef(allBuildings);
   useEffect(() => { allBuildingsRef.current = allBuildings; }, [allBuildings]);
@@ -330,7 +536,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
     return false;
   };
 
-  const canPlaceGroup = useCallback((drag: DragState, anchorX: number, anchorY: number): boolean => {
+  const canPlaceGroupGeometry = useCallback((drag: DragState, anchorX: number, anchorY: number): boolean => {
     const groupSet = new Set(drag.groupIds);
     const moved: Array<{ id: number; x: number; y: number; w: number; h: number }> = [];
 
@@ -364,6 +570,23 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
 
     return true;
   }, []);
+
+  const canPlaceGroup = useCallback((drag: DragState, anchorX: number, anchorY: number): boolean => {
+    if (!canPlaceGroupGeometry(drag, anchorX, anchorY)) return false;
+
+    const moved: Array<{ id: number; x: number; y: number }> = [];
+    for (const id of drag.groupIds) {
+      const off = drag.groupOffsets[id] ?? { dx: 0, dy: 0 };
+      moved.push({ id, x: anchorX + off.dx, y: anchorY + off.dy });
+    }
+
+    const overrides = new Map<number, { x: number; y: number }>();
+    for (const m of moved) {
+      overrides.set(m.id, { x: m.x, y: m.y });
+    }
+
+    return validateRoadRulesRef.current(drag.groupIds, overrides, new Set(drag.groupIds));
+  }, [canPlaceGroupGeometry]);
 
   const screenToGrid = useCallback((clientX: number, clientY: number): { x: number; y: number } | null => {
     if (!svgRef.current || !viewBox) return null;
@@ -408,11 +631,23 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
           const count = Math.min(stepsAway, dragState.lineIds.length);
 
           lineCells = [];
+          const lineOverrides = new Map<number, { x: number; y: number }>();
+          const forcedPlacedIds = new Set<number>();
           for (let i = 0; i < count; i++) {
             const offset = i + 1; // first line segment starts adjacent to start cell
             const cx = useH ? sg.x + dir * offset * step : sg.x;
             const cy = useH ? sg.y : sg.y + dir * offset * step;
-            lineCells.push({ x: cx, y: cy, valid: canPlaceRef.current(dragState.lineIds[i], cx, cy) });
+            const lineId = dragState.lineIds[i];
+            if (lineId == null) continue;
+            lineOverrides.set(lineId, { x: cx, y: cy });
+            forcedPlacedIds.add(lineId);
+            const validLineSegment = canPlaceGeometryRef.current(lineId, cx, cy)
+              && validateRoadRulesRef.current(
+                [lineId],
+                lineOverrides,
+                forcedPlacedIds
+              );
+            lineCells.push({ x: cx, y: cy, valid: validLineSegment });
           }
 
           candidate = { x: sg.x, y: sg.y };
@@ -541,7 +776,17 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
 
       // ── Single-tile drop ────────────────────────────────────────────
       const isOutside = dragState.candidate ? checkOutsideBounds(dragState.id, dragState.candidate.x, dragState.candidate.y) : true;
-      const dropValid = dragState.candidate && dragState.valid && !isOutside;
+      const stagedGeometryValid = !!dragState.candidate && dragState.originParked
+        ? canPlaceGeometryRef.current(dragState.id, dragState.candidate.x, dragState.candidate.y)
+        : false;
+      const mapMoveGeometryValid = !!dragState.candidate && !dragState.originParked
+        ? canPlaceGroupGeometry(dragState, dragState.candidate.x, dragState.candidate.y)
+        : false;
+      const dropValid = !!dragState.candidate && (
+        dragState.originParked
+          ? (stagedGeometryValid && !isOutside)
+          : mapMoveGeometryValid
+      );
       const dropOnPanel = dragState.overPanel;
 
       // For staged placement mode, invalid clicks should keep the current drag active
@@ -707,13 +952,6 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       
-      // Exit fullscreen if active
-      if (isFullscreen) {
-        e.preventDefault();
-        onFullscreenChange(false);
-        return;
-      }
-      
       if (dragState?.originParked) {
         e.preventDefault();
         setDragState(null);
@@ -730,7 +968,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [dragState, selectedIds, selectionRegion, isFullscreen, onFullscreenChange]);
+  }, [dragState, selectedIds, selectionRegion]);
 
   useEffect(() => {
     const isEditableTarget = (target: EventTarget | null): boolean => {
@@ -1013,6 +1251,46 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
 
   const placedCount = allBuildings.length - parkedIds.size;
 
+  const runLayoutValidation = useCallback(() => {
+    const connectivity = computeRoadConnectivity(mapBuildings);
+    const invalid = new Set<number>();
+
+    for (const b of mapBuildings) {
+      const id = b.entry.id;
+      if (b.entry.type === 'street') {
+        if (!connectivity.connectedStreetIdsAny.has(id)) {
+          invalid.add(id);
+        }
+        continue;
+      }
+
+      const requiredStreetLevel = getRequiredStreetLevelFor(b);
+      const needsRoad = !INHERENT_NO_ROAD_TYPES.has(b.entry.type) && requiredStreetLevel > 0;
+      if (needsRoad) {
+        const ok = requiredStreetLevel >= 2
+          ? connectivity.connectedBuildingIds2x2.has(id)
+          : connectivity.connectedBuildingIdsAny.has(id);
+        if (!ok) invalid.add(id);
+      } else if (!INHERENT_NO_ROAD_TYPES.has(b.entry.type)) {
+        if (connectivity.connectedBuildingIdsAny.has(id)) {
+          invalid.add(id);
+        }
+      }
+    }
+
+    setValidationInvalidIds(invalid);
+    setValidationRan(true);
+    validatedPositionsRef.current = positions;
+    validatedParkedIdsRef.current = parkedIds;
+  }, [computeRoadConnectivity, mapBuildings, getRequiredStreetLevelFor, positions, parkedIds]);
+
+  useEffect(() => {
+    if (!validationRan) return;
+    if (positions === validatedPositionsRef.current && parkedIds === validatedParkedIdsRef.current) return;
+    setValidationRan(false);
+    setValidationInvalidIds(new Set());
+  }, [positions, parkedIds, validationRan]);
+
   const captureCurrentLayout = useCallback((name: string): SavedLayout => {
     return {
       name,
@@ -1044,6 +1322,14 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
       return next.sort((a, b) => b.savedAt - a.savedAt);
     });
   }, [captureCurrentLayout]);
+
+  const updateLayout = useCallback((layoutName: string) => {
+    const existing = savedLayouts.find(l => l.name === layoutName);
+    if (!existing) return;
+
+    const nextLayout = captureCurrentLayout(layoutName);
+    setSavedLayouts(prev => prev.map(l => (l.name === layoutName ? nextLayout : l)));
+  }, [savedLayouts, captureCurrentLayout]);
 
   const loadLayout = useCallback((layoutName: string) => {
     const layout = savedLayouts.find(l => l.name === layoutName);
@@ -1136,6 +1422,29 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
       return (a.name.localeCompare(b.name) || a.era.localeCompare(b.era)) * direction;
     });
   }, [allBuildings, parkedIds, matchesFilters, data, parkedSortMode, parkedSortDirection]);
+
+  const movedOnMapIds = useMemo(() => {
+    const ids = new Set<number>();
+    for (const b of allBuildings) {
+      if (parkedIds.has(b.entry.id)) continue;
+      const current = positions.get(b.entry.id) ?? { x: b.x, y: b.y };
+      if (current.x !== b.x || current.y !== b.y) ids.add(b.entry.id);
+    }
+    return ids;
+  }, [allBuildings, parkedIds, positions]);
+
+  const changedTotalCount = useMemo(() => {
+    let count = 0;
+    for (const b of allBuildings) {
+      const current = positions.get(b.entry.id) ?? { x: b.x, y: b.y };
+      if (parkedIds.has(b.entry.id) || current.x !== b.x || current.y !== b.y) count++;
+    }
+    return count;
+  }, [allBuildings, parkedIds, positions]);
+
+  const mapCursor = isPanning
+    ? 'grabbing'
+    : (dragState?.originParked ? 'crosshair' : 'default');
 
   if (!data || !bounds || !viewBox) return null;
 
@@ -1250,11 +1559,35 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
             </button>
             <button
               className="grid-dropdown-btn"
-              title={isFullscreen ? "Exit fullscreen (ESC)" : "Hide top bar and tabs"}
+              title={isFullscreen ? "Exit fullscreen" : "Hide top bar and tabs"}
               onClick={() => onFullscreenChange(!isFullscreen)}
             >
               {isFullscreen ? '⛶ Exit Fullscreen' : '⛶ Fullscreen'}
             </button>
+            <button
+              className="grid-dropdown-btn"
+              title="Run road and Town Hall connectivity validation"
+              onClick={runLayoutValidation}
+            >
+              Validate Layout
+            </button>
+            <button
+              className={`grid-dropdown-btn ${showChangedHighlights ? 'active' : ''}`}
+              title="Highlight map buildings moved from their original positions"
+              onClick={() => setShowChangedHighlights(v => !v)}
+            >
+              {showChangedHighlights ? 'Hide Changes' : 'Identify Changes'}
+            </button>
+            <span className="designer-changes-summary">
+              {changedTotalCount} changed ({parkedIds.size} parked)
+            </span>
+            {validationRan && (
+              <span className={`designer-validation-status ${validationInvalidIds.size > 0 ? 'invalid' : 'valid'}`}>
+                {validationInvalidIds.size > 0
+                  ? `${validationInvalidIds.size} invalid`
+                  : 'All valid'}
+              </span>
+            )}
           </div>
         </div>
       </div>
@@ -1298,8 +1631,17 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
                 <button
                   key={stack.key}
                   className={`designer-item parked${dragState?.id === stack.id || (dragState?.originParked && dragState?.cityentityId === stack.key.split('::')[0]) ? ' active-drag' : ''}`}
-                  onClick={(e) => startDrag(e, stack.id)}
-                  title="Click to pick up and place, or click another item to switch"
+                  onClick={(e) => {
+                    if (dragState?.originParked && dragState.id === stack.id) {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setDragState(null);
+                      setIsPanning(false);
+                      return;
+                    }
+                    startDrag(e, stack.id);
+                  }}
+                  title="Click to pick up and place, click again to unselect, or click another item to switch"
                 >
                   <span className="designer-item-color" style={{ background: getBuildingColor(stack.type) }} />
                   <span className="designer-item-name">{stack.name}</span>
@@ -1327,6 +1669,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
                     <span>{new Date(layout.savedAt).toLocaleString()}</span>
                   </div>
                   <div className="designer-version-actions">
+                    <button className="designer-mini-btn" onClick={() => updateLayout(layout.name)}>Update</button>
                     <button className="designer-mini-btn" onClick={() => loadLayout(layout.name)}>Load</button>
                     <button className="designer-mini-btn" onClick={() => exportLayout(layout.name)}>Export</button>
                     <button className="designer-mini-btn danger" onClick={() => deleteLayout(layout.name)}>Delete</button>
@@ -1340,7 +1683,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
         <div
           className="grid-wrapper"
           ref={wrapperCallbackRef}
-          style={{ position: 'relative' }}
+          style={{ position: 'relative', cursor: mapCursor }}
           onWheelCapture={handleWrapperWheel}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
@@ -1379,6 +1722,19 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
 
             {mapBuildings.filter(b => !dragState?.groupIds.includes(b.entry.id)).map(b => (
               <g key={b.entry.id}>
+                {(() => {
+                  const isSelected = selectedIds.has(b.entry.id);
+                  const isInvalid = validationInvalidIds.has(b.entry.id);
+                  const isChangedLocation = showChangedHighlights && movedOnMapIds.has(b.entry.id);
+                  const strokeColor = isInvalid
+                    ? 'rgba(231, 76, 60, 0.98)'
+                    : isChangedLocation
+                      ? 'rgba(255, 159, 28, 0.98)'
+                      : isSelected
+                        ? 'rgba(241, 196, 15, 0.95)'
+                        : 'rgba(0,0,0,0.35)';
+                  const strokeW = isInvalid ? 2 : (isChangedLocation ? 1.9 : (isSelected ? 1.6 : 0.6));
+                  return (
                 <rect
                   x={b.x * CELL_SIZE + 0.5}
                   y={b.y * CELL_SIZE + 0.5}
@@ -1386,8 +1742,8 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
                   height={b.length * CELL_SIZE - 1}
                   fill={getBuildingColor(b.entry.type)}
                   opacity={0.85}
-                  stroke={selectedIds.has(b.entry.id) ? 'rgba(241, 196, 15, 0.95)' : 'rgba(0,0,0,0.35)'}
-                  strokeWidth={selectedIds.has(b.entry.id) ? 1.6 : 0.6}
+                  stroke={strokeColor}
+                  strokeWidth={strokeW}
                   rx={1}
                   onMouseDown={(e) => {
                     if (e.shiftKey) {
@@ -1408,8 +1764,10 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
                     }
                     startDrag(e, b.entry.id);
                   }}
-                  style={{ cursor: 'grab' }}
+                  style={{ cursor: dragState?.id === b.entry.id ? 'grabbing' : 'move' }}
                 />
+                  );
+                })()}
                 {b.entry.type !== 'street' && (
                   <foreignObject
                     x={b.x * CELL_SIZE + 0.5}

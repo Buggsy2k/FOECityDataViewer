@@ -3,7 +3,7 @@ import { useCityData } from '../context/CityDataContext';
 import type { CityData } from '../types/citydata';
 
 export default function DataLoader() {
-  const { setData } = useCityData();
+  const { isLoading, setIsLoading, setData } = useCityData();
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
 
@@ -22,23 +22,32 @@ export default function DataLoader() {
   }, [setData]);
 
   const handleFile = useCallback((file: File) => {
+    setIsLoading(true);
     const reader = new FileReader();
-    reader.onload = () => parseAndLoad(reader.result as string);
-    reader.onerror = () => setError('Failed to read file');
+    reader.onload = () => {
+      parseAndLoad(reader.result as string);
+      setIsLoading(false);
+    };
+    reader.onerror = () => {
+      setError('Failed to read file');
+      setIsLoading(false);
+    };
     reader.readAsText(file);
-  }, [parseAndLoad]);
+  }, [parseAndLoad, setIsLoading]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
+    if (isLoading) return;
     setDragging(false);
     const file = e.dataTransfer.files[0];
     if (file) handleFile(file);
-  }, [handleFile]);
+  }, [handleFile, isLoading]);
 
   const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    if (isLoading) return;
     const file = e.target.files?.[0];
     if (file) handleFile(file);
-  }, [handleFile]);
+  }, [handleFile, isLoading]);
 
   return (
     <div className="data-loader">
@@ -47,20 +56,22 @@ export default function DataLoader() {
         <p className="subtitle">Forge of Empires City Analysis Tool</p>
 
         <div
-          className={`drop-zone ${dragging ? 'dragging' : ''}`}
+          className={`drop-zone ${dragging ? 'dragging' : ''}${isLoading ? ' loading' : ''}`}
           onDrop={handleDrop}
-          onDragOver={e => { e.preventDefault(); setDragging(true); }}
+          onDragOver={e => { e.preventDefault(); if (!isLoading) setDragging(true); }}
           onDragLeave={() => setDragging(false)}
         >
           <div className="drop-icon">📁</div>
-          <p>Drag & drop your <strong>citydata.json</strong> here</p>
-          <p className="or">or</p>
+          <p>{isLoading ? 'Loading city JSON...' : <>Drag & drop your <strong>citydata.json</strong> here</>}</p>
+          {!isLoading && <p className="or">or</p>}
+          {isLoading && <div className="loader-inline-spinner" aria-hidden="true" />}
           <label className="file-button">
             Browse Files
             <input
               type="file"
               accept=".json"
               onChange={handleInputChange}
+              disabled={isLoading}
               hidden
             />
           </label>

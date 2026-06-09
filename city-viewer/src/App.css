@@ -279,6 +279,11 @@ body {
   background: var(--bg-secondary);
 }
 
+.drop-zone.loading {
+  opacity: 0.75;
+  pointer-events: none;
+}
+
 .drop-zone.dragging {
   border-color: var(--accent);
   background: var(--bg-card);
@@ -312,6 +317,16 @@ body {
 
 .file-button:hover {
   background: var(--accent-hover);
+}
+
+.loader-inline-spinner {
+  width: 22px;
+  height: 22px;
+  margin: 0.4rem auto 0.9rem;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  border-top-color: var(--accent);
+  animation: spin 0.8s linear infinite;
 }
 
 .error-message {
@@ -393,6 +408,12 @@ body {
   color: var(--text-primary);
 }
 
+.reset-btn:disabled,
+.tab-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 /* ===== Tab Navigation ===== */
 .tab-nav {
   display: flex;
@@ -441,6 +462,43 @@ body {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+}
+
+.app-loading-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(9, 11, 20, 0.68);
+  backdrop-filter: blur(2px);
+}
+
+.app-loading-card {
+  min-width: 220px;
+  padding: 1rem 1.25rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(20, 26, 46, 0.95);
+  color: var(--text-primary);
+  display: flex;
+  gap: 0.65rem;
+  align-items: center;
+  font-weight: 600;
+}
+
+.app-loading-spinner {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  border-top-color: var(--accent);
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 /* ===== Production Summary ===== */
@@ -1388,7 +1446,7 @@ body {
   align-items: center;
   text-align: left;
   padding: 0.35rem 0.45rem;
-  cursor: grab;
+  cursor: pointer;
 }
 
 .designer-item:hover {
@@ -1404,6 +1462,35 @@ body {
   border-color: rgba(88, 214, 141, 0.85);
   background: rgba(88, 214, 141, 0.15);
   box-shadow: 0 0 0 2px rgba(88, 214, 141, 0.35);
+}
+
+.designer-changes-summary {
+  font-size: 0.76rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.designer-validation-status {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.designer-validation-status.valid {
+  color: rgba(88, 214, 141, 0.95);
+  border-color: rgba(88, 214, 141, 0.6);
+  background: rgba(88, 214, 141, 0.12);
+}
+
+.designer-validation-status.invalid {
+  color: rgba(231, 76, 60, 0.95);
+  border-color: rgba(231, 76, 60, 0.7);
+  background: rgba(231, 76, 60, 0.14);
 }
 
 .designer-drag-ghost {
