@@ -140,6 +140,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
   const [hiddenSizes, setHiddenSizes] = useState<Set<string>>(new Set());
   const [hiddenRoadNeeds, setHiddenRoadNeeds] = useState<Set<RoadNeed>>(new Set());
   const [searchText, setSearchText] = useState('');
+  const [mapSearchText, setMapSearchText] = useState('');
   const [showChangedHighlights, setShowChangedHighlights] = useState(false);
   const [parkedSortMode, setParkedSortMode] = useState<ParkedSortMode>('name');
   const [parkedSortDirection, setParkedSortDirection] = useState<SortDirection>('asc');
@@ -396,6 +397,18 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
         return { ...b, x: pos.x, y: pos.y };
       });
   }, [allBuildings, parkedIds, positions]);
+
+  const mapSearchQuery = mapSearchText.trim().toLowerCase();
+
+  const mapSearchMatchCount = useMemo(() => {
+    if (!mapSearchQuery) return mapBuildings.length;
+    let count = 0;
+    for (const b of mapBuildings) {
+      const name = getDesignerBuildingName(b).toLowerCase();
+      if (name.includes(mapSearchQuery)) count++;
+    }
+    return count;
+  }, [mapBuildings, mapSearchQuery, getDesignerBuildingName]);
 
   const computeRoadConnectivity = useCallback((placed: DesignerBuilding[]) => {
     const streetByCellAny = new Map<string, number>();
@@ -1748,6 +1761,27 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
           >
             📍
           </button>
+          <div className="grid-search designer-map-search">
+            <input
+              type="text"
+              placeholder="Search map buildings..."
+              value={mapSearchText}
+              onChange={e => setMapSearchText(e.target.value)}
+              className="grid-search-input"
+            />
+            {mapSearchText.trim().length > 0 && (
+              <button
+                type="button"
+                className="grid-search-clear"
+                title="Clear map search"
+                aria-label="Clear map search"
+                onClick={() => setMapSearchText('')}
+              >
+                ×
+              </button>
+            )}
+          </div>
+          <span className="grid-search-count">{mapSearchMatchCount} on map</span>
           <span className="designer-changes-summary">
             {changedTotalCount} changed ({parkedIds.size} parked)
           </span>
@@ -2079,6 +2113,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
 
             {mapBuildings.filter(b => !dragState?.groupIds.includes(b.entry.id)).map(b => {
               const fullName = getDesignerBuildingName(b);
+              const matchesMapSearch = !mapSearchQuery || fullName.toLowerCase().includes(mapSearchQuery);
               const showNameTooltip = b.entry.type !== 'street' && isLabelLikelyClipped(fullName, b.width, b.length);
               return (
               <g key={b.entry.id}>
@@ -2094,8 +2129,14 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
                       ? 'rgba(255, 159, 28, 0.98)'
                       : isSelected
                         ? 'rgba(241, 196, 15, 0.95)'
+                      : (mapSearchQuery && matchesMapSearch)
+                        ? 'rgba(0, 234, 255, 0.98)'
                         : 'rgba(0,0,0,0.35)';
                   const strokeW = isInvalid ? 2 : (isChangedLocation ? 1.9 : (isSelected ? 1.6 : 0.6));
+                  const baseOpacity = isPlaceholder ? 0.96 : 0.85;
+                  const fillOpacity = mapSearchQuery
+                    ? (matchesMapSearch ? 1 : 0.22)
+                    : baseOpacity;
                   return (
                 <rect
                   x={b.x * CELL_SIZE + 0.5}
@@ -2103,7 +2144,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
                   width={b.width * CELL_SIZE - 1}
                   height={b.length * CELL_SIZE - 1}
                   fill={isPlaceholder ? 'url(#designer-placeholder-pattern)' : getBuildingColor(b.entry.type)}
-                  opacity={isPlaceholder ? 0.96 : 0.85}
+                  opacity={fillOpacity}
                   stroke={strokeColor}
                   strokeWidth={strokeW}
                   rx={1}
