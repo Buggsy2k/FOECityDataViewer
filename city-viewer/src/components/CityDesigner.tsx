@@ -637,6 +637,74 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
 
   const mousePositionRef = useRef({ x: 0, y: 0 });
 
+  const dragStateRef = useRef<DragState | null>(null);
+  useEffect(() => { dragStateRef.current = dragState; }, [dragState]);
+
+  // Swap chain: holds the map state from before the first swap so Escape can abort the entire chain.
+  const swapChainSnapshotRef = useRef<{ positions: Map<number, { x: number; y: number }>; parkedIds: Set<number> } | null>(null);
+
+  const playBonk = useCallback(() => {
+    try {
+      const ctx = new AudioContext();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(220, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(110, ctx.currentTime + 0.08);
+      gain.gain.setValueAtTime(0.35, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.15);
+      osc.onended = () => ctx.close();
+    } catch {
+      // AudioContext unavailable — fail silently
+    }
+  }, []);
+
+  // Returns the id of the single placed building that blocks a drop, or null if 0 or ≥2 blockers.
+  // Also returns null if any target cell is outside the unlocked area.
+  const findSingleBlockerForDrop = useCallback((drag: DragState, anchorX: number, anchorY: number): number | null => {
+    const groupSet = new Set(drag.groupIds);
+    const movedRects: Array<{ x: number; y: number; w: number; h: number }> = [];
+
+    for (const id of drag.groupIds) {
+      const b = buildingByIdRef.current.get(id);
+      if (!b) return null;
+      const off = drag.groupOffsets[id] ?? { dx: 0, dy: 0 };
+      const x = anchorX + off.dx;
+      const y = anchorY + off.dy;
+      for (let dx = 0; dx < b.width; dx++) {
+        for (let dy = 0; dy < b.length; dy++) {
+          if (!unlockedCellsRef.current.has(`${x + dx},${y + dy}`)) return null;
+        }
+      }
+      movedRects.push({ x, y, w: b.width, h: b.length });
+    }
+
+    let blocker: number | null = null;
+    for (const other of allBuildingsRef.current) {
+      if (groupSet.has(other.entry.id)) continue;
+      if (parkedIdsRef.current.has(other.entry.id)) continue;
+      const p = positionsRef.current.get(other.entry.id) ?? { x: other.x, y: other.y };
+      for (const rect of movedRects) {
+        const overlapX = rect.x < p.x + other.width && rect.x + rect.w > p.x;
+        const overlapY = rect.y < p.y + other.length && rect.y + rect.h > p.y;
+        if (overlapX && overlapY) {
+          if (blocker !== null && blocker !== other.entry.id) return null; // ≥2 blockers
+          blocker = other.entry.id;
+          break;
+        }
+      }
+    }
+    return blocker;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const findSingleBlockerForDropRef = useRef(findSingleBlockerForDrop);
+  useEffect(() => { findSingleBlockerForDropRef.current = findSingleBlockerForDrop; }, [findSingleBlockerForDrop]);
+
   // Check if all cells of a building are within unlocked areas (called at drop time with fresh refs)
   const checkOutsideBounds = (buildingId: number, x: number, y: number): boolean => {
     const building = buildingByIdRef.current.get(buildingId);
@@ -912,6 +980,73 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
       );
       const dropOnPanel = dragState.overPanel;
 
+      // ── Swap check: if exactly one building blocks the drop target, swap them ──
+      if (!dropValid && dragState.candidate && !dropOnPanel) {
+        const anchor = dragState.candidate;
+        const singleBlockerId = findSingleBlockerForDropRef.current(dragState, anchor.x, anchor.y);
+
+        if (singleBlockerId !== null) {
+          // On the first swap in a chain, record history once and save the pre-chain snapshot.
+          // Subsequent swaps in the same chain do NOT push to history, so Ctrl+Z (and Escape)
+          // both restore the entire chain atomically — preventing overlapping mid-chain states.
+          if (!swapChainSnapshotRef.current) {
+            recordHistory();
+            swapChainSnapshotRef.current = {
+              positions: new Map(positionsRef.current),
+              parkedIds: new Set(parkedIdsRef.current),
+            };
+          }
+
+          // Place the dragged building(s) at the target position.
+          setPositions(prev => {
+            const next = new Map(prev);
+            for (const id of dragState.groupIds) {
+              const off = dragState.groupOffsets[id] ?? { dx: 0, dy: 0 };
+              next.set(id, { x: anchor.x + off.dx, y: anchor.y + off.dy });
+            }
+            return next;
+          });
+          if (dragState.originParked) {
+            setParkedIds(prev => {
+              const next = new Set(prev);
+              for (const id of dragState.groupIds) next.delete(id);
+              return next;
+            });
+          }
+
+          // Begin dragging the displaced building so the user can place it elsewhere.
+          const blockerB = buildingByIdRef.current.get(singleBlockerId);
+          if (blockerB) {
+            const blockerPos = positionsRef.current.get(singleBlockerId) ?? { x: blockerB.x, y: blockerB.y };
+            const mx = mousePositionRef.current.x;
+            const my = mousePositionRef.current.y;
+            const cg = screenToGridRef.current(mx, my);
+            setDragState({
+              id: singleBlockerId,
+              origin: blockerPos,
+              originParked: false,
+              groupIds: [singleBlockerId],
+              groupOffsets: { [singleBlockerId]: { dx: 0, dy: 0 } },
+              startPointer: { x: mx, y: my },
+              pointer: { x: mx, y: my },
+              overPanel: false,
+              candidate: cg,
+              valid: false, // recalculated on first mousemove
+              startGrid: null,
+              cityentityId: blockerB.entry.cityentity_id,
+              isStreet: blockerB.entry.type === 'street',
+              lineCells: null,
+              lineIds: [],
+            });
+          } else {
+            swapChainSnapshotRef.current = null;
+            setDragState(null);
+          }
+          setIsPanning(false);
+          return;
+        }
+      }
+
       // For staged placement mode, invalid clicks should keep the current drag active
       // so the user can keep searching for a valid spot. Exit with Esc.
       if (dragState.originParked && !dropValid) {
@@ -921,7 +1056,10 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
 
       if (dropValid) {
         // ── Valid drop on map ──
-        recordHistory();
+        // Don't push a new history entry if we're completing a swap chain — the chain
+        // start already recorded one clean snapshot, and calling recordHistory() here
+        // would capture both buildings at the same cell (an overlapping intermediate state).
+        if (!swapChainSnapshotRef.current) recordHistory();
         setPositions(prev => {
           const next = new Map(prev);
           if (!dragState.originParked) {
@@ -942,6 +1080,8 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
           }
           return next;
         });
+
+        swapChainSnapshotRef.current = null; // swap chain complete on successful drop
 
         // ── Continuous placement: auto-start next of same type ─────────
         if (dragState.originParked && !dragState.isStreet) {
@@ -976,7 +1116,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
         }
       } else if (dropOnPanel) {
         // ── Drop on staging panel: always stage ──
-        recordHistory();
+        if (!swapChainSnapshotRef.current) recordHistory();
         setPositions(prev => {
           const next = new Map(prev);
           if (dragState.origin) {
@@ -989,9 +1129,10 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
           next.add(dragState.id);
           return next;
         });
+        swapChainSnapshotRef.current = null;
       } else if (isOutside) {
         // ── Drop outside city boundaries: move to staging ──
-        recordHistory();
+        if (!swapChainSnapshotRef.current) recordHistory();
         setPositions(prev => {
           const next = new Map(prev);
           if (dragState.origin) {
@@ -1004,22 +1145,31 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
           next.add(dragState.id);
           return next;
         });
+        swapChainSnapshotRef.current = null;
       } else {
-        // ── Invalid drop inside city: restore to origin ──
-        recordHistory();
-        setPositions(prev => {
-          const next = new Map(prev);
-          if (dragState.origin) {
-            next.set(dragState.id, dragState.origin);
-          }
-          return next;
-        });
-        setParkedIds(prev => {
-          const next = new Set(prev);
-          if (dragState.originParked) next.add(dragState.id);
-          else next.delete(dragState.id);
-          return next;
-        });
+        // ── Invalid drop inside city ──
+        if (swapChainSnapshotRef.current) {
+          // Mid-chain invalid drop: bonk and keep the drag alive so the user can try elsewhere.
+          playBonk();
+          setIsPanning(false);
+          return; // do NOT call setDragState(null)
+        } else {
+          // Normal invalid drop: restore to origin.
+          recordHistory();
+          setPositions(prev => {
+            const next = new Map(prev);
+            if (dragState.origin) {
+              next.set(dragState.id, dragState.origin);
+            }
+            return next;
+          });
+          setParkedIds(prev => {
+            const next = new Set(prev);
+            if (dragState.originParked) next.add(dragState.id);
+            else next.delete(dragState.id);
+            return next;
+          });
+        }
       }
 
       setDragState(null);
@@ -1068,6 +1218,17 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
       if (!previous) return;
 
       e.preventDefault();
+
+      // Cancel any active drag before applying undo — a building that is currently
+      // "in hand" is not on the map, so restoring positions without first dropping it
+      // would leave it able to land on an already-occupied cell after the undo.
+      if (dragStateRef.current) {
+        setDragState(null);
+        setIsPanning(false);
+      }
+      // Clear a swap chain so Escape after an undo doesn't try to restore a stale snapshot.
+      swapChainSnapshotRef.current = null;
+
       applyLayoutSnapshot(previous);
     };
 
@@ -1078,7 +1239,17 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
-      
+
+      // Abort an in-progress swap chain: restore the map to its pre-chain state.
+      if (swapChainSnapshotRef.current) {
+        e.preventDefault();
+        applyLayoutSnapshot(swapChainSnapshotRef.current);
+        swapChainSnapshotRef.current = null;
+        setDragState(null);
+        setIsPanning(false);
+        return;
+      }
+
       if (dragState?.originParked) {
         e.preventDefault();
         setDragState(null);
