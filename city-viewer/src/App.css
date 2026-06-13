@@ -1718,6 +1718,35 @@ body {
   white-space: nowrap;
 }
 
+.designer-item-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.designer-item-icon-btn {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  border: 1px solid rgba(231, 76, 60, 0.45);
+  background: rgba(231, 76, 60, 0.12);
+  color: #f0b6b1;
+  font-size: 0.82rem;
+  line-height: 1;
+  cursor: pointer;
+  user-select: none;
+}
+
+.designer-item-icon-btn:hover,
+.designer-item-icon-btn:focus {
+  border-color: rgba(231, 76, 60, 0.72);
+  background: rgba(231, 76, 60, 0.2);
+  outline: none;
+}
+
 .designer-empty {
   font-size: 0.8rem;
   color: var(--text-muted);
@@ -1799,6 +1828,36 @@ body {
   padding: 0.2rem 0.5rem;
   font-size: 0.72rem;
   cursor: pointer;
+}
+
+.designer-mini-icon-btn {
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  border-radius: 5px;
+  font-size: 0.88rem;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.designer-mini-icon-btn:hover {
+  border-color: var(--text-secondary);
+}
+
+.designer-mini-icon-btn.danger {
+  color: #f0b6b1;
+  border-color: rgba(231, 76, 60, 0.6);
+  background: rgba(231, 76, 60, 0.12);
+}
+
+.designer-mini-icon-btn.danger:hover {
+  border-color: rgba(231, 76, 60, 0.82);
+  background: rgba(231, 76, 60, 0.2);
 }
 
 .designer-mini-btn:hover {
