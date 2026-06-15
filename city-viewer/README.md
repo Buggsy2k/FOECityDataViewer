@@ -27,5 +27,5 @@ The dev server starts at **http://localhost:5173**. Open it in your browser, the
 ## Promote To Server
 
 ```bash
-cd /volume1/web/FOECityData
+.\deploy-dist.ps1
 ```
