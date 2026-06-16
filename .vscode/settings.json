@@ -3,6 +3,7 @@
         "npm install": true,
         "ConvertFrom-Json": true,
         "Group-Object": true,
-        "npm run build": true
+        "npm run build": true,
+        "Set-Content": true
     }
 }

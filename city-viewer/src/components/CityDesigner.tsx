@@ -1,9 +1,11 @@
-import { useMemo, useState, useCallback, useRef, useEffect } from 'react';
+﻿import { useMemo, useState, useCallback, useRef, useEffect } from 'react';
 import { useCityData } from '../context/CityDataContext';
 import { getGridBounds, getPlacedBuildings, getBuildingColor, type PlacedBuilding } from '../utils/gridUtils';
 import { ERA_RANK, extractEra, resolveBuildingName } from '../utils/dataProcessing';
 
 const CELL_SIZE = 12;
+const MIN_VIEW = 5 * CELL_SIZE;   // max zoom in  (~5 cells visible)
+const MAX_VIEW = 400 * CELL_SIZE; // max zoom out (~400 cells visible)
 
 type RoadNeed = 'none' | 'road1' | 'road2';
 type ParkedSortMode = 'name' | 'era' | 'size';
@@ -111,6 +113,10 @@ function pointInRect(x: number, y: number, rect: DOMRect): boolean {
   return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
 }
 
+function isFinitePoint(p: { x: number; y: number } | null | undefined): p is { x: number; y: number } {
+  return !!p && Number.isFinite(p.x) && Number.isFinite(p.y);
+}
+
 function sizeArea(sizeKey: string): number {
   const [w, h] = sizeKey.split('x').map(Number);
   if (!Number.isFinite(w) || !Number.isFinite(h)) return 0;
@@ -188,6 +194,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
   const typeDropdownRef = useRef<HTMLDivElement>(null);
   const sizeDropdownRef = useRef<HTMLDivElement>(null);
   const roadDropdownRef = useRef<HTMLDivElement>(null);
+  const importLayoutInputRef = useRef<HTMLInputElement>(null);
 
   const placeholderTemplateById = useMemo(() => {
     const map = new Map<number, PlaceholderTemplate>();
@@ -322,11 +329,18 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
 
   const unlockedCells = useMemo(() => {
     const cells = new Set<string>();
-    if (!data) return cells;
+    if (!data?.UnlockedAreas) return cells;
     for (const area of data.UnlockedAreas) {
-      for (let dx = 0; dx < area.width; dx++) {
-        for (let dy = 0; dy < area.length; dy++) {
-          cells.add(`${area.x + dx},${area.y + dy}`);
+      const ax = area.x ?? 0;
+      const ay = area.y ?? 0;
+      const aw = area.width ?? 0;
+      const al = area.length ?? 0;
+      if (!Number.isFinite(ax) || !Number.isFinite(ay) || !Number.isFinite(aw) || !Number.isFinite(al)) continue;
+      if (aw <= 0 || al <= 0) continue;
+
+      for (let dx = 0; dx < aw; dx++) {
+        for (let dy = 0; dy < al; dy++) {
+          cells.add(`${ax + dx},${ay + dy}`);
         }
       }
     }
@@ -342,7 +356,13 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
   }, [parkedIds]);
 
   const applyLayoutSnapshot = useCallback((snapshot: LayoutSnapshot) => {
-    setPositions(new Map(snapshot.positions));
+    setPositions(() => {
+      const next = new Map<number, { x: number; y: number }>();
+      for (const [id, pos] of snapshot.positions) {
+        if (isFinitePoint(pos)) next.set(id, pos);
+      }
+      return next;
+    });
     setParkedIds(new Set(snapshot.parkedIds));
   }, []);
 
@@ -432,9 +452,12 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
     return allBuildings
       .filter(b => !parkedIds.has(b.entry.id))
       .map(b => {
-        const pos = positions.get(b.entry.id) ?? { x: b.x, y: b.y };
+        const fallback = { x: b.x, y: b.y };
+        const raw = positions.get(b.entry.id);
+        const pos = isFinitePoint(raw) ? raw : fallback;
         return { ...b, x: pos.x, y: pos.y };
-      });
+      })
+      .filter(b => Number.isFinite(b.x) && Number.isFinite(b.y));
   }, [allBuildings, parkedIds, positions]);
 
   const mapSearchQuery = mapSearchText.trim().toLowerCase();
@@ -811,14 +834,15 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
   const screenToGrid = useCallback((clientX: number, clientY: number): { x: number; y: number } | null => {
     if (!svgRef.current || !viewBox) return null;
     const rect = svgRef.current.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
     if (!pointInRect(clientX, clientY, rect)) return null;
 
     const sx = (clientX - rect.left) / rect.width;
     const sy = (clientY - rect.top) / rect.height;
-    return {
-      x: Math.floor((viewBox.x + sx * viewBox.w) / CELL_SIZE),
-      y: Math.floor((viewBox.y + sy * viewBox.h) / CELL_SIZE),
-    };
+    const gx = Math.floor((viewBox.x + sx * viewBox.w) / CELL_SIZE);
+    const gy = Math.floor((viewBox.y + sy * viewBox.h) / CELL_SIZE);
+    if (!Number.isFinite(gx) || !Number.isFinite(gy)) return null;
+    return { x: gx, y: gy };
   }, [viewBox]);
 
   const screenToGridRef = useRef(screenToGrid);
@@ -1342,8 +1366,9 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
       const mx = (e.clientX - rect.left) / rect.width;
       const my = (e.clientY - rect.top) / rect.height;
       const scale = e.deltaY > 0 ? 1.1 : 0.9;
-      const newW = prev.w * scale;
-      const newH = prev.h * scale;
+      const newW = Math.min(Math.max(prev.w * scale, MIN_VIEW), MAX_VIEW);
+      const actualScale = newW / prev.w;
+      const newH = prev.h * actualScale;
       return {
         x: prev.x + (prev.w - newW) * mx,
         y: prev.y + (prev.h - newH) * my,
@@ -1471,9 +1496,15 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
   }, [allBuildings, parkedIds, positions]);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    if (e.button !== 0) return;
+    if (e.button !== 0 && e.button !== 2) return;
 
-    if (e.shiftKey && !dragState) {
+    const isRightPan = e.button === 2;
+    if (isRightPan) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+
+    if (!isRightPan && e.shiftKey && !dragState) {
       const start = screenToGridRef.current(e.clientX, e.clientY);
       if (!start) return;
       setSelectionRegion({ start, end: start });
@@ -1481,7 +1512,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
       return;
     }
 
-    if (e.ctrlKey) {
+    if (e.ctrlKey || isRightPan) {
       isCtrlPanningRef.current = true;
       suppressDropOnMouseUpRef.current = true;
       setIsPanning(true);
@@ -1831,7 +1862,11 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
     for (const b of allBuildings) {
       const match = layout.placements.find(p => p.id === b.entry.id);
       if (match) {
-        map.set(b.entry.id, { x: match.x, y: match.y });
+        if (Number.isFinite(match.x) && Number.isFinite(match.y)) {
+          map.set(b.entry.id, { x: match.x, y: match.y });
+        } else {
+          map.set(b.entry.id, { x: b.x, y: b.y });
+        }
         if (match.parked) parked.add(b.entry.id);
       } else {
         map.set(b.entry.id, { x: b.x, y: b.y });
@@ -1862,6 +1897,75 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
     a.remove();
     URL.revokeObjectURL(a.href);
   }, [savedLayouts]);
+
+  const importLayoutsFromFile = useCallback((file: File) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const raw = JSON.parse(String(reader.result));
+        const candidates = Array.isArray(raw)
+          ? raw
+          : [raw?.layout ?? raw];
+
+        const parsed: SavedLayout[] = [];
+        for (const candidate of candidates) {
+          if (!candidate || typeof candidate !== 'object') continue;
+          const name = typeof candidate.name === 'string' ? candidate.name.trim() : '';
+          const placementsRaw = Array.isArray((candidate as { placements?: unknown[] }).placements)
+            ? (candidate as { placements: unknown[] }).placements
+            : null;
+          if (!name || !placementsRaw) continue;
+
+          const placements: SavedLayout['placements'] = [];
+          for (const p of placementsRaw) {
+            if (!p || typeof p !== 'object') continue;
+            const rec = p as { id?: unknown; x?: unknown; y?: unknown; parked?: unknown };
+            if (typeof rec.id !== 'number' || !Number.isFinite(rec.id)) continue;
+            if (typeof rec.x !== 'number' || !Number.isFinite(rec.x)) continue;
+            if (typeof rec.y !== 'number' || !Number.isFinite(rec.y)) continue;
+            placements.push({
+              id: rec.id,
+              x: rec.x,
+              y: rec.y,
+              parked: !!rec.parked,
+            });
+          }
+
+          if (placements.length === 0) continue;
+          parsed.push({
+            name,
+            savedAt: typeof candidate.savedAt === 'number' && Number.isFinite(candidate.savedAt)
+              ? candidate.savedAt
+              : Date.now(),
+            placements,
+          });
+        }
+
+        if (parsed.length === 0) {
+          window.alert('No valid saved layouts were found in this file.');
+          return;
+        }
+
+        setSavedLayouts(prev => {
+          const next = [...prev];
+          for (const incoming of parsed) {
+            const idx = next.findIndex(l => l.name.toLowerCase() === incoming.name.toLowerCase());
+            if (idx === -1) {
+              next.unshift(incoming);
+              continue;
+            }
+
+            const overwrite = window.confirm(`A layout named "${incoming.name}" already exists. Overwrite it?`);
+            if (overwrite) next[idx] = incoming;
+          }
+          return next.sort((a, b) => b.savedAt - a.savedAt);
+        });
+      } catch {
+        window.alert('Could not import layout file. Please choose a valid City Designer export JSON.');
+      }
+    };
+    reader.readAsText(file);
+  }, []);
 
   const deleteLayout = useCallback((layoutName: string) => {
     if (!window.confirm(`Delete layout "${layoutName}"?`)) return;
@@ -2238,7 +2342,21 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
           <div className="designer-versions">
             <div className="designer-versions-header">
               <h4>Saved Versions</h4>
-              <button className="grid-dropdown-btn" onClick={saveLayout}>Save Version</button>
+              <div className="designer-version-actions">
+                <button className="grid-dropdown-btn" onClick={saveLayout}>Save Version</button>
+                <button className="grid-dropdown-btn" onClick={() => importLayoutInputRef.current?.click()}>Import</button>
+                <input
+                  ref={importLayoutInputRef}
+                  type="file"
+                  accept=".json,application/json"
+                  hidden
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) importLayoutsFromFile(file);
+                    e.target.value = '';
+                  }}
+                />
+              </div>
             </div>
             <div className="designer-versions-list">
               {savedLayouts.length === 0 && <div className="designer-empty">No saved versions yet.</div>}
@@ -2349,6 +2467,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
           style={{ position: 'relative', cursor: mapCursor }}
           onWheelCapture={handleWrapperWheel}
           onMouseDown={handleMouseDown}
+          onContextMenu={(e) => e.preventDefault()}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseUp}
@@ -2368,24 +2487,33 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
               </pattern>
             </defs>
 
-            {data.UnlockedAreas.map((area, i) => (
-              <g key={`area-${i}`}>
-                <rect
-                  x={area.x * CELL_SIZE}
-                  y={area.y * CELL_SIZE}
-                  width={area.width * CELL_SIZE}
-                  height={area.length * CELL_SIZE}
-                  fill="#1a1a2e"
-                />
-                <rect
-                  x={area.x * CELL_SIZE}
-                  y={area.y * CELL_SIZE}
-                  width={area.width * CELL_SIZE}
-                  height={area.length * CELL_SIZE}
-                  fill="url(#designer-grid-1x1)"
-                />
-              </g>
-            ))}
+            {data.UnlockedAreas.map((area, i) => {
+              const ax = area.x ?? 0;
+              const ay = area.y ?? 0;
+              const aw = area.width ?? 0;
+              const al = area.length ?? 0;
+              if (!Number.isFinite(ax) || !Number.isFinite(ay) || !Number.isFinite(aw) || !Number.isFinite(al)) return null;
+              if (aw <= 0 || al <= 0) return null;
+
+              return (
+                <g key={`area-${i}`}>
+                  <rect
+                    x={ax * CELL_SIZE}
+                    y={ay * CELL_SIZE}
+                    width={aw * CELL_SIZE}
+                    height={al * CELL_SIZE}
+                    fill="#1a1a2e"
+                  />
+                  <rect
+                    x={ax * CELL_SIZE}
+                    y={ay * CELL_SIZE}
+                    width={aw * CELL_SIZE}
+                    height={al * CELL_SIZE}
+                    fill="url(#designer-grid-1x1)"
+                  />
+                </g>
+              );
+            })}
 
             {mapBuildings.filter(b => !dragState?.groupIds.includes(b.entry.id)).map(b => {
               const fullName = getDesignerBuildingName(b);
@@ -2425,6 +2553,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
                   strokeWidth={strokeW}
                   rx={1}
                   onMouseDown={(e) => {
+                    if (e.button !== 0) return;
                     if (e.shiftKey) {
                       e.preventDefault();
                       e.stopPropagation();
@@ -2513,7 +2642,9 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
               if (dragState.lineCells && dragState.lineCells.length > 0) {
                 return (
                   <g pointerEvents="none">
-                    {dragState.lineCells.map((cell, i) => (
+                    {dragState.lineCells
+                      .filter(cell => Number.isFinite(cell.x) && Number.isFinite(cell.y))
+                      .map((cell, i) => (
                       <rect
                         key={i}
                         x={cell.x * CELL_SIZE + 0.5}
@@ -2532,6 +2663,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
 
               // Single tile preview
               if (!dragState.candidate) return null;
+              if (!Number.isFinite(dragState.candidate.x) || !Number.isFinite(dragState.candidate.y)) return null;
 
               if (!dragState.originParked && dragState.groupIds.length > 1) {
                 return (
@@ -2542,6 +2674,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
                       const off = dragState.groupOffsets[id] ?? { dx: 0, dy: 0 };
                       const x = dragState.candidate!.x + off.dx;
                       const y = dragState.candidate!.y + off.dy;
+                      if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
                       return (
                         <rect
                           key={id}

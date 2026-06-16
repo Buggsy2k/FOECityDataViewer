@@ -1412,8 +1412,9 @@ export default function LayoutOptimizer() {
       const mx = (e.clientX - rect.left) / rect.width;
       const my = (e.clientY - rect.top) / rect.height;
 
-      const newW = current.w * scale;
-      const newH = current.h * scale;
+      const newW = Math.min(Math.max(current.w * scale, MIN_VIEW), MAX_VIEW);
+      const actualScale = newW / current.w;
+      const newH = current.h * actualScale;
       return {
         x: current.x + (current.w - newW) * mx,
         y: current.y + (current.h - newH) * my,

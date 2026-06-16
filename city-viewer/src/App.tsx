@@ -131,7 +131,9 @@ function AppContent() {
         {activeTab === 'buildings' && <BuildingTable />}
         {activeTab === 'military' && <MilitaryTable />}
         {activeTab === 'grid' && <CityGrid />}
-        {activeTab === 'designer' && <CityDesigner isFullscreen={designerFullscreen} onFullscreenChange={setDesignerFullscreen} />}
+        <div style={{ display: activeTab === 'designer' ? 'block' : 'none' }}>
+          <CityDesigner isFullscreen={designerFullscreen} onFullscreenChange={setDesignerFullscreen} />
+        </div>
         {activeTab === 'greatbuildings' && <GreatBuildings />}
         {activeTab === 'optimizer' && <LayoutOptimizer />}
       </main>

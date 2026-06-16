@@ -5,6 +5,8 @@ import { resolveBuildingName, formatResourceName, getBuildingProduction, formatN
 import { buildCurrentLayoutReport, downloadTextFile, copyTextToClipboard } from '../utils/layoutExport';
 
 const CELL_SIZE = 12;
+const MIN_VIEW = 5 * CELL_SIZE;   // max zoom in  (~5 cells visible)
+const MAX_VIEW = 400 * CELL_SIZE; // max zoom out (~400 cells visible)
 
 const TYPE_LABELS: Record<string, string> = {
   main_building: 'Main Building',
@@ -362,8 +364,9 @@ export default function CityGrid() {
       const mx = (e.clientX - rect.left) / rect.width;
       const my = (e.clientY - rect.top) / rect.height;
 
-      const newW = prev.w * scale;
-      const newH = prev.h * scale;
+      const newW = Math.min(Math.max(prev.w * scale, MIN_VIEW), MAX_VIEW);
+      const actualScale = newW / prev.w;
+      const newH = prev.h * actualScale;
       return {
         x: prev.x + (prev.w - newW) * mx,
         y: prev.y + (prev.h - newH) * my,
@@ -382,7 +385,11 @@ export default function CityGrid() {
   }, [handleWheel]);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    if (e.button !== 0) return;
+    if (e.button !== 0 && e.button !== 2) return;
+    if (e.button === 2) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
     setIsPanning(true);
     setViewBox(prev => {
       panStart.current = {
@@ -670,6 +677,7 @@ export default function CityGrid() {
           className="city-svg"
           viewBox={`${viewBox.x} ${viewBox.y} ${viewBox.w} ${viewBox.h}`}
         >
+          onContextMenu={(e) => e.preventDefault()}
           {/* Grid pattern definition for 1x1 cells */}
           <defs>
             <pattern id="grid-1x1" width={CELL_SIZE} height={CELL_SIZE} patternUnits="userSpaceOnUse">
