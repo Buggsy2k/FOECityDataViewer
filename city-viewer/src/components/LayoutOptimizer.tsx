@@ -6,6 +6,8 @@ import { getGridBounds, getPlacedBuildings, getBuildingColor, type GridBounds } 
 import { buildLayoutReport, downloadTextFile, copyTextToClipboard, type ExportBuilding } from '../utils/layoutExport';
 
 const PREVIEW_CELL = 12;
+const MIN_VIEW = 5 * PREVIEW_CELL;
+const MAX_VIEW = 400 * PREVIEW_CELL;
 
 interface Rect {
   x: number;

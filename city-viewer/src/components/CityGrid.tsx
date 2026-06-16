@@ -668,6 +668,7 @@ export default function CityGrid() {
         ref={wrapperCallbackRef}
         style={{ position: 'relative' }}
         onMouseDown={handleMouseDown}
+        onContextMenu={(e) => e.preventDefault()}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
@@ -677,7 +678,6 @@ export default function CityGrid() {
           className="city-svg"
           viewBox={`${viewBox.x} ${viewBox.y} ${viewBox.w} ${viewBox.h}`}
         >
-          onContextMenu={(e) => e.preventDefault()}
           {/* Grid pattern definition for 1x1 cells */}
           <defs>
             <pattern id="grid-1x1" width={CELL_SIZE} height={CELL_SIZE} patternUnits="userSpaceOnUse">
