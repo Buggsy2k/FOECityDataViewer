@@ -181,7 +181,7 @@ function AppContent() {
         {activeTab === 'buildings' && <BuildingTable />}
         {activeTab === 'military' && <MilitaryTable />}
         {activeTab === 'grid' && <CityGrid />}
-        <div style={{ display: activeTab === 'designer' ? 'block' : 'none' }}>
+        <div className="designer-tab-pane" style={{ display: activeTab === 'designer' ? 'flex' : 'none' }}>
           <CityDesigner isFullscreen={designerFullscreen} onFullscreenChange={setDesignerFullscreen} />
         </div>
         {activeTab === 'greatbuildings' && <GreatBuildings />}

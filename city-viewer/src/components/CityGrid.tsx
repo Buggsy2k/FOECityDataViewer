@@ -2,7 +2,6 @@ import { useMemo, useState, useCallback, useRef, useEffect } from 'react';
 import { useCityData } from '../context/CityDataContext';
 import { getGridBounds, getPlacedBuildings, getBuildingColor, getStreetEra, type PlacedBuilding } from '../utils/gridUtils';
 import { resolveBuildingName, formatResourceName, getBuildingProduction, formatNumber, ERA_ORDER } from '../utils/dataProcessing';
-import { buildCurrentLayoutReport, downloadTextFile, copyTextToClipboard } from '../utils/layoutExport';
 
 const CELL_SIZE = 12;
 const MIN_VIEW = 5 * CELL_SIZE;   // max zoom in  (~5 cells visible)
@@ -351,6 +350,42 @@ export default function CityGrid() {
     }
   }, [bounds, viewBox]);
 
+  const fitToScreen = useCallback(() => {
+    if (!bounds) return;
+
+    const pad = 2;
+    const mapX = (bounds.minX - pad) * CELL_SIZE;
+    const mapY = (bounds.minY - pad) * CELL_SIZE;
+    const mapW = (bounds.width + pad * 2) * CELL_SIZE;
+    const mapH = (bounds.height + pad * 2) * CELL_SIZE;
+
+    const wrapper = wrapperRef.current;
+    const wrapperW = wrapper?.clientWidth ?? 0;
+    const wrapperH = wrapper?.clientHeight ?? 0;
+    if (wrapperW <= 0 || wrapperH <= 0 || mapW <= 0 || mapH <= 0) {
+      setViewBox({ x: mapX, y: mapY, w: mapW, h: mapH });
+      return;
+    }
+
+    const mapAspect = mapW / mapH;
+    const wrapperAspect = wrapperW / wrapperH;
+
+    let viewW = mapW;
+    let viewH = mapH;
+    if (wrapperAspect > mapAspect) {
+      viewW = mapH * wrapperAspect;
+    } else {
+      viewH = mapW / wrapperAspect;
+    }
+
+    setViewBox({
+      x: mapX - (viewW - mapW) / 2,
+      y: mapY - (viewH - mapH) / 2,
+      w: viewW,
+      h: viewH,
+    });
+  }, [bounds]);
+
   const handleWheel = useCallback((e: WheelEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -636,27 +671,10 @@ export default function CityGrid() {
           <div className="grid-export">
             <button
               className="grid-dropdown-btn"
-              title="Download a text+JSON layout report (current city)"
-              onClick={() => {
-                if (!data || !bounds) return;
-                const r = buildCurrentLayoutReport(data, bounds);
-                downloadTextFile('city-layout-current.txt', r.text, 'text/plain');
-                downloadTextFile('city-layout-current.json', r.json, 'application/json');
-              }}
+              title="Fit the full map into the visible working area"
+              onClick={fitToScreen}
             >
-              Export Layout
-            </button>
-            <button
-              className="grid-dropdown-btn"
-              title="Copy the layout report (text + JSON) to the clipboard"
-              onClick={async () => {
-                if (!data || !bounds) return;
-                const r = buildCurrentLayoutReport(data, bounds);
-                const ok = await copyTextToClipboard(r.text);
-                if (!ok) downloadTextFile('city-layout-current.txt', r.text, 'text/plain');
-              }}
-            >
-              Copy Layout
+              Fit to Screen
             </button>
           </div>
         </div>

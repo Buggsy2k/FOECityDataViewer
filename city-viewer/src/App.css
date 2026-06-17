@@ -240,10 +240,11 @@ body {
   color: var(--text-primary);
   line-height: 1.5;
   min-height: 100vh;
+  overflow: hidden;
 }
 
 #root {
-  min-height: 100vh;
+  height: 100vh;
 }
 
 /* ===== Data Loader ===== */
@@ -378,7 +379,8 @@ body {
 .app {
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  height: 100%;
+  overflow: hidden;
 }
 
 .app-header {
@@ -598,6 +600,12 @@ body {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  min-height: 0;
+}
+
+.designer-tab-pane {
+  flex: 1;
+  min-height: 0;
 }
 
 .app-loading-overlay {
@@ -1150,6 +1158,9 @@ body {
   flex-direction: column;
   gap: 0.75rem;
   height: 100%;
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
 }
 
 .city-grid-container h2 {
@@ -1163,6 +1174,18 @@ body {
   align-items: center;
   flex-wrap: wrap;
   gap: 0.75rem;
+}
+
+.city-grid-container .grid-header {
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 1.1rem;
+}
+
+.city-grid-container .grid-toolbar {
+  justify-content: flex-start;
+  margin-left: 0.4rem;
 }
 
 .grid-legend {
@@ -1215,7 +1238,7 @@ body {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(240px, 300px);
   gap: 1rem;
-  align-items: start;
+  align-items: stretch;
   flex: 1;
   min-height: 0;
 }
@@ -1227,7 +1250,8 @@ body {
   padding: 0.75rem 0.85rem;
   font-size: 0.82rem;
   color: var(--text-secondary);
-  max-height: 75vh;
+  height: 100%;
+  min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -1519,6 +1543,8 @@ body {
   gap: 0.75rem;
   height: 100%;
   min-height: 0;
+  flex: 1;
+  overflow: hidden;
 }
 
 .city-designer-body {
@@ -1527,6 +1553,7 @@ body {
   gap: 1rem;
   flex: 1;
   min-height: 0;
+  overflow: hidden;
 }
 
 .designer-panel {
