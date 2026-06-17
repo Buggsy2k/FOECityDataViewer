@@ -26,6 +26,7 @@ interface DragState {
   id: number;
   origin: { x: number; y: number } | null;
   originParked: boolean;
+  gridAnchorOffset: { dx: number; dy: number };
   groupIds: number[];
   groupOffsets: Record<number, { dx: number; dy: number }>;
   startPointer?: { x: number; y: number };
@@ -868,18 +869,25 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
   }, [canPlaceGroupGeometry]);
 
   const screenToGrid = useCallback((clientX: number, clientY: number): { x: number; y: number } | null => {
-    if (!svgRef.current || !viewBox) return null;
-    const rect = svgRef.current.getBoundingClientRect();
+    if (!svgRef.current) return null;
+    const svg = svgRef.current;
+    const rect = svg.getBoundingClientRect();
     if (!rect.width || !rect.height) return null;
     if (!pointInRect(clientX, clientY, rect)) return null;
 
-    const sx = (clientX - rect.left) / rect.width;
-    const sy = (clientY - rect.top) / rect.height;
-    const gx = Math.floor((viewBox.x + sx * viewBox.w) / CELL_SIZE);
-    const gy = Math.floor((viewBox.y + sy * viewBox.h) / CELL_SIZE);
+    // Convert from screen coordinates to SVG world coordinates, accounting for aspect-ratio fitting.
+    const ctm = svg.getScreenCTM();
+    if (!ctm) return null;
+    const point = svg.createSVGPoint();
+    point.x = clientX;
+    point.y = clientY;
+    const world = point.matrixTransform(ctm.inverse());
+
+    const gx = Math.floor(world.x / CELL_SIZE);
+    const gy = Math.floor(world.y / CELL_SIZE);
     if (!Number.isFinite(gx) || !Number.isFinite(gy)) return null;
     return { x: gx, y: gy };
-  }, [viewBox]);
+  }, []);
 
   const screenToGridRef = useRef(screenToGrid);
   useEffect(() => { screenToGridRef.current = screenToGrid; }, [screenToGrid]);
@@ -891,7 +899,8 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
     const onMouseMove = (e: MouseEvent) => {
       mousePositionRef.current = { x: e.clientX, y: e.clientY };
       const overPanel = panelRef.current ? pointInRect(e.clientX, e.clientY, panelRef.current.getBoundingClientRect()) : false;
-      let candidate = screenToGridRef.current(e.clientX, e.clientY);
+      const rawCandidate = screenToGridRef.current(e.clientX, e.clientY);
+      let candidate = rawCandidate ? { x: rawCandidate.x - dragState.gridAnchorOffset.dx, y: rawCandidate.y - dragState.gridAnchorOffset.dy } : null;
       let valid = candidate ? canPlaceRef.current(dragId, candidate.x, candidate.y) : false;
       let lineCells: LineCell[] | null = null;
 
@@ -998,6 +1007,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
                 id: remaining[0],
                 origin: positionsRef.current.get(remaining[0]) ?? null,
                 originParked: true,
+                gridAnchorOffset: { dx: 0, dy: 0 },
                 groupIds: [remaining[0]],
                 groupOffsets: { [remaining[0]]: { dx: 0, dy: 0 } },
                 pointer: { x: mx, y: my },
@@ -1044,6 +1054,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
               id: remaining[0],
               origin: positionsRef.current.get(remaining[0]) ?? null,
               originParked: true,
+              gridAnchorOffset: { dx: 0, dy: 0 },
               groupIds: [remaining[0]],
               groupOffsets: { [remaining[0]]: { dx: 0, dy: 0 } },
               pointer: { x: mx, y: my },
@@ -1124,6 +1135,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
               id: singleBlockerId,
               origin: blockerPos,
               originParked: false,
+              gridAnchorOffset: { dx: 0, dy: 0 },
               groupIds: [singleBlockerId],
               groupOffsets: { [singleBlockerId]: { dx: 0, dy: 0 } },
               startPointer: { x: mx, y: my },
@@ -1197,6 +1209,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
               id: nextB.entry.id,
               origin: positionsRef.current.get(nextB.entry.id) ?? null,
               originParked: true,
+              gridAnchorOffset: { dx: 0, dy: 0 },
               groupIds: [nextB.entry.id],
               groupOffsets: { [nextB.entry.id]: { dx: 0, dy: 0 } },
               pointer: { x: mx, y: my },
@@ -1394,7 +1407,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
   }, [selectedIds, dragState, recordHistory]);
 
   const handleWheel = useCallback((e: WheelEvent) => {
-    e.preventDefault();
+    if (e.cancelable) e.preventDefault();
     e.stopPropagation();
     setViewBox(prev => {
       if (!prev || !svgRef.current) return prev;
@@ -1438,7 +1451,11 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
 
     const isStreet = source.entry.type === 'street';
     const origin = positions.get(buildingId) ?? { x: source.x, y: source.y };
-    const candidate = screenToGridRef.current(e.clientX, e.clientY);
+    const cursorGrid = screenToGridRef.current(e.clientX, e.clientY);
+    const gridAnchorOffset = (!isParked && cursorGrid)
+      ? { dx: cursorGrid.x - origin.x, dy: cursorGrid.y - origin.y }
+      : { dx: 0, dy: 0 };
+    const candidate = cursorGrid ? { x: cursorGrid.x - gridAnchorOffset.dx, y: cursorGrid.y - gridAnchorOffset.dy } : null;
 
     const groupIds = isParked
       ? [buildingId]
@@ -1474,6 +1491,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
       id: buildingId,
       origin,
       originParked: isParked,
+      gridAnchorOffset,
       groupIds: uniqueGroupIds,
       groupOffsets,
       startPointer: { x: e.clientX, y: e.clientY },
@@ -1488,6 +1506,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
           id: buildingId,
           origin,
           originParked: isParked,
+          gridAnchorOffset,
           groupIds: uniqueGroupIds,
           groupOffsets,
           pointer: { x: e.clientX, y: e.clientY },
@@ -2772,7 +2791,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
         return (
           <div
             className="designer-drag-ghost"
-            style={{ left: dragState.pointer.x + 14, top: dragState.pointer.y + 14 }}
+            style={{ left: dragState.pointer.x + 14, top: dragState.pointer.y + 24 }}
           >
             <span
               className="designer-drag-ghost-swatch"
