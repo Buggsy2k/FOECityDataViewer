@@ -283,6 +283,20 @@ function extractStatsFromComponent(comp: Record<string, unknown>): BuildingEraSt
         case 'def_boost_attacker': stats.atkArmyDef += b.value; break;
         case 'att_boost_defender': stats.defArmyAtk += b.value; break;
         case 'def_boost_defender': stats.defArmyDef += b.value; break;
+        case 'att_def_boost_attacker':
+          stats.atkArmyAtk += b.value;
+          stats.atkArmyDef += b.value;
+          break;
+        case 'att_def_boost_defender':
+          stats.defArmyAtk += b.value;
+          stats.defArmyDef += b.value;
+          break;
+        case 'att_def_boost_attacker_defender':
+          stats.atkArmyAtk += b.value;
+          stats.atkArmyDef += b.value;
+          stats.defArmyAtk += b.value;
+          stats.defArmyDef += b.value;
+          break;
       }
     }
   }
@@ -300,6 +314,11 @@ function resolveEraKey(cityentityId: string, data: CityData, level?: number): st
       return componentEras[idx];
     }
   }
+
+  if ('AllAge' in entity.components) return 'AllAge';
+
+  const componentEras = ERA_ORDER.filter(e => e in entity.components!);
+  if (componentEras.length > 0) return componentEras[0];
   return null;
 }
 

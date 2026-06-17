@@ -49,6 +49,28 @@ export default function DataLoader() {
     if (file) handleFile(file);
   }, [handleFile, isLoading]);
 
+  const handlePasteData = useCallback(async () => {
+    if (isLoading) return;
+    if (!navigator.clipboard?.readText) {
+      setError('Clipboard paste is not supported in this browser context.');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const text = await navigator.clipboard.readText();
+      if (!text.trim()) {
+        setError('Clipboard is empty. Copy citydata.json content and try again.');
+        return;
+      }
+      parseAndLoad(text);
+    } catch {
+      setError('Unable to read clipboard. Allow clipboard access and try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [isLoading, parseAndLoad, setIsLoading]);
+
   return (
     <div className="data-loader">
       <div className="loader-content">
@@ -65,16 +87,21 @@ export default function DataLoader() {
           <p>{isLoading ? 'Loading city JSON...' : <>Drag & drop your <strong>citydata.json</strong> here</>}</p>
           {!isLoading && <p className="or">or</p>}
           {isLoading && <div className="loader-inline-spinner" aria-hidden="true" />}
-          <label className="file-button">
-            Browse Files
-            <input
-              type="file"
-              accept=".json"
-              onChange={handleInputChange}
-              disabled={isLoading}
-              hidden
-            />
-          </label>
+          <div className="loader-actions">
+            <label className="file-button">
+              Browse Files
+              <input
+                type="file"
+                accept=".json"
+                onChange={handleInputChange}
+                disabled={isLoading}
+                hidden
+              />
+            </label>
+            <button type="button" className="paste-button" onClick={handlePasteData} disabled={isLoading}>
+              Paste Data
+            </button>
+          </div>
         </div>
 
         {error && <div className="error-message">{error}</div>}

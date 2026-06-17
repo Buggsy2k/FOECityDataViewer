@@ -97,14 +97,13 @@ export default function BuildingTable() {
 
     return Array.from(groups.values()).map(entries => {
       const entry = entries[0];
-      // Aggregate production across all identical buildings
-      const allRes: ResourceMap = {};
-      for (const e of entries) {
-        const prod = getBuildingProduction(e);
-        addResources(allRes, prod.base);
-        addResources(allRes, prod.motivated);
-      }
-      const summary = Object.entries(allRes)
+      // Show per-building production values even when multiple identical buildings are grouped.
+      const prod = getBuildingProduction(entry);
+      const oneBuildingRes: ResourceMap = {};
+      addResources(oneBuildingRes, prod.base);
+      addResources(oneBuildingRes, prod.motivated);
+
+      const summary = Object.entries(oneBuildingRes)
         .sort((a, b) => b[1] - a[1])
         .slice(0, 3)
         .map(([k, v]) => `${formatNumber(v)} ${formatResourceName(k)}`)
@@ -307,7 +306,7 @@ export default function BuildingTable() {
         : 'basic',
     }),
     columnHelper.accessor('productionSummary', {
-      header: 'Daily Production (total)',
+      header: 'Daily Production (per building)',
       cell: info => <span className="production-text">{info.getValue()}</span>,
       enableSorting: false,
     }),

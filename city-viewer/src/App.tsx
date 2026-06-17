@@ -19,6 +19,7 @@ function AppContent() {
   const [activeTab, setActiveTab] = useState<Tab>('production');
   const [dragOver, setDragOver] = useState(false);
   const [designerFullscreen, setDesignerFullscreen] = useState(false);
+  const [pasteError, setPasteError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -30,6 +31,7 @@ function AppContent() {
 
   const loadFile = useCallback((file: File) => {
     setIsLoading(true);
+    setPasteError(null);
     const reader = new FileReader();
     reader.onload = () => {
       try {
@@ -41,6 +43,44 @@ function AppContent() {
     reader.onerror = () => { setIsLoading(false); };
     reader.readAsText(file);
   }, [setData, setIsLoading]);
+
+  const loadFromText = useCallback((text: string): boolean => {
+    try {
+      const json = JSON.parse(text) as CityData;
+      if (!json.CityMapData) {
+        setPasteError('Invalid JSON: missing CityMapData.');
+        return false;
+      }
+      setPasteError(null);
+      setData(json);
+      return true;
+    } catch {
+      setPasteError('Failed to parse JSON from clipboard.');
+      return false;
+    }
+  }, [setData]);
+
+  const handlePasteData = useCallback(async () => {
+    if (isLoading) return;
+    if (!navigator.clipboard?.readText) {
+      setPasteError('Clipboard paste is not supported in this browser context.');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const text = await navigator.clipboard.readText();
+      if (!text.trim()) {
+        setPasteError('Clipboard is empty. Copy citydata.json content and try again.');
+        return;
+      }
+      loadFromText(text);
+    } catch {
+      setPasteError('Unable to read clipboard. Allow clipboard access and try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [isLoading, loadFromText, setIsLoading]);
 
   const stats = useMemo(() => {
     if (!data) return null;
@@ -82,6 +122,7 @@ function AppContent() {
             e.preventDefault();
             if (isLoading) return;
             setDragOver(false);
+            setPasteError(null);
             const f = e.dataTransfer.files[0];
             if (f) loadFile(f);
           }}
@@ -92,9 +133,14 @@ function AppContent() {
           }}
           onDragLeave={() => setDragOver(false)}
         >
-          <button className="reset-btn" disabled={isLoading} onClick={() => fileInputRef.current?.click()}>
-            📂 Load New File
-          </button>
+          <div className="header-actions">
+            <button className="reset-btn" disabled={isLoading} onClick={() => fileInputRef.current?.click()}>
+              📂 Load New File
+            </button>
+            <button className="reset-btn" disabled={isLoading} onClick={handlePasteData}>
+              📋 Paste Data
+            </button>
+          </div>
           <input
             ref={fileInputRef}
             type="file"
@@ -105,6 +151,8 @@ function AppContent() {
           />
         </div>
       </header>
+
+      {pasteError && <div className="paste-error-banner">{pasteError}</div>}
 
       <nav className="tab-nav">
         {([

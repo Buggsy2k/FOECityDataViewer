@@ -319,6 +319,34 @@ body {
   background: var(--accent-hover);
 }
 
+.loader-actions {
+  display: flex;
+  gap: 0.6rem;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.paste-button {
+  padding: 0.6rem 1.5rem;
+  background: transparent;
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: all 0.2s;
+}
+
+.paste-button:hover {
+  border-color: var(--text-secondary);
+  color: var(--text-primary);
+}
+
+.paste-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .loader-inline-spinner {
   width: 22px;
   height: 22px;
@@ -386,6 +414,12 @@ body {
   display: inline-block;
 }
 
+.header-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
 .reset-drop-zone.drag-over .reset-btn {
   border-color: var(--gold);
   color: var(--gold);
@@ -412,6 +446,16 @@ body {
 .tab-btn:disabled {
   opacity: 0.55;
   cursor: not-allowed;
+}
+
+.paste-error-banner {
+  margin: 0.5rem 1.5rem;
+  padding: 0.6rem 0.75rem;
+  background: rgba(231, 76, 60, 0.15);
+  border: 1px solid var(--red);
+  border-radius: 6px;
+  color: var(--red);
+  font-size: 0.85rem;
 }
 
 /* ===== Tab Navigation ===== */
