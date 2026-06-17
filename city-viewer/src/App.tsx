@@ -1,6 +1,7 @@
-import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { useCityData } from './context/CityDataContext';
 import DataLoader from './components/DataLoader';
+import Dashboard from './components/Dashboard';
 import ProductionSummary from './components/ProductionSummary';
 import BuildingTable from './components/BuildingTable';
 import CityGrid from './components/CityGrid';
@@ -8,30 +9,39 @@ import CityDesigner from './components/CityDesigner';
 import GreatBuildings from './components/GreatBuildings';
 import MilitaryTable from './components/MilitaryTable';
 import LayoutOptimizer from './components/LayoutOptimizer';
-import { aggregateProduction, formatNumber } from './utils/dataProcessing';
 import type { CityData } from './types/citydata';
 import './App.css';
 
-type Tab = 'production' | 'buildings' | 'military' | 'grid' | 'designer' | 'greatbuildings' | 'optimizer';
+type Tab = 'dashboard' | 'production' | 'buildings' | 'military' | 'grid' | 'designer' | 'greatbuildings' | 'optimizer';
 
 function AppContent() {
   const { data, dataVersion, isLoading, setIsLoading, setData } = useCityData();
-  const [activeTab, setActiveTab] = useState<Tab>('production');
+  const [activeTab, setActiveTab] = useState<Tab>('designer');
   const [dragOver, setDragOver] = useState(false);
   const [designerFullscreen, setDesignerFullscreen] = useState(false);
   const [pasteError, setPasteError] = useState<string | null>(null);
+  const [pasteArmed, setPasteArmed] = useState(false);
+  const pasteButtonRef = useRef<HTMLButtonElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const preserveTabOnNextDataLoadRef = useRef(false);
 
   useEffect(() => {
     if (!data) return;
-    setActiveTab('production');
+    const preserveActiveTab = preserveTabOnNextDataLoadRef.current;
+    preserveTabOnNextDataLoadRef.current = false;
+    if (!preserveActiveTab) {
+      setActiveTab('designer');
+    }
     setDragOver(false);
     setDesignerFullscreen(false);
+    setPasteArmed(false);
+    setPasteError(null);
   }, [dataVersion, data]);
 
   const loadFile = useCallback((file: File) => {
     setIsLoading(true);
     setPasteError(null);
+    preserveTabOnNextDataLoadRef.current = false;
     const reader = new FileReader();
     reader.onload = () => {
       try {
@@ -52,6 +62,7 @@ function AppContent() {
         return false;
       }
       setPasteError(null);
+      preserveTabOnNextDataLoadRef.current = true;
       setData(json);
       return true;
     } catch {
@@ -60,42 +71,28 @@ function AppContent() {
     }
   }, [setData]);
 
-  const handlePasteData = useCallback(async () => {
+  const handleQuickPaste = useCallback((e: React.ClipboardEvent<HTMLButtonElement>) => {
+    e.preventDefault();
     if (isLoading) return;
-    if (!navigator.clipboard?.readText) {
-      setPasteError('Clipboard paste is not supported in this browser context.');
+
+    const text = e.clipboardData?.getData('text') ?? '';
+    if (!text.trim()) {
+      setPasteError('Clipboard paste was empty.');
       return;
     }
 
     setIsLoading(true);
-    try {
-      const text = await navigator.clipboard.readText();
-      if (!text.trim()) {
-        setPasteError('Clipboard is empty. Copy citydata.json content and try again.');
-        return;
+    // Let the loading UI paint before parsing very large JSON text.
+    window.setTimeout(() => {
+      try {
+        loadFromText(text);
+        setPasteArmed(false);
+        pasteButtonRef.current?.blur();
+      } finally {
+        setIsLoading(false);
       }
-      loadFromText(text);
-    } catch {
-      setPasteError('Unable to read clipboard. Allow clipboard access and try again.');
-    } finally {
-      setIsLoading(false);
-    }
+    }, 0);
   }, [isLoading, loadFromText, setIsLoading]);
-
-  const stats = useMemo(() => {
-    if (!data) return null;
-    const entries = Object.values(data.CityMapData).filter(e => e.id < 2_000_000_000);
-    const agg = aggregateProduction(data);
-    const gbCount = entries.filter(e => e.type === 'greatbuilding').length;
-    return {
-      totalBuildings: entries.filter(e => e.type !== 'street').length,
-      streets: entries.filter(e => e.type === 'street').length,
-      greatBuildings: gbCount,
-      dailyFP: agg.total.strategy_points || 0,
-      dailyCoins: agg.total.money || 0,
-      dailySupplies: agg.total.supplies || 0,
-    };
-  }, [data]);
 
   if (!data) return <DataLoader />;
 
@@ -105,17 +102,28 @@ function AppContent() {
         <div className="header-left">
           <h1>FOE City Viewer</h1>
         </div>
-        <div className="header-stats">
-          {stats && (
-            <>
-              <span className="stat"><strong>{stats.totalBuildings}</strong> buildings</span>
-              <span className="stat"><strong>{stats.greatBuildings}</strong> GBs</span>
-              <span className="stat fp-stat">⚡ <strong>{formatNumber(stats.dailyFP)}</strong> FP/day</span>
-              <span className="stat">💰 <strong>{formatNumber(stats.dailyCoins)}</strong>/day</span>
-              <span className="stat">📦 <strong>{formatNumber(stats.dailySupplies)}</strong>/day</span>
-            </>
-          )}
-        </div>
+
+        <nav className="tab-nav">
+          {([
+            ['dashboard', '📈 Dashboard'],
+            ['designer', '🧩 City Designer'],
+            ['grid', '🗺️ Grid Map'],
+            ['buildings', '🏠 Buildings'],
+            ['greatbuildings', '🏛️ Great Buildings'],
+            ['military', '⚔️ Military Units'],
+            ['production', '📊 Production'],
+          ] as [Tab, string][]).map(([key, label]) => (
+            <button
+              key={key}
+              className={`tab-btn ${activeTab === key ? 'active' : ''}`}
+              onClick={() => { if (!isLoading) setActiveTab(key); }}
+              disabled={isLoading}
+            >
+              {label}
+            </button>
+          ))}
+        </nav>
+
         <div
           className={`reset-drop-zone ${dragOver ? 'drag-over' : ''}`}
           onDrop={e => {
@@ -137,8 +145,21 @@ function AppContent() {
             <button className="reset-btn" disabled={isLoading} onClick={() => fileInputRef.current?.click()}>
               📂 Load New File
             </button>
-            <button className="reset-btn" disabled={isLoading} onClick={handlePasteData}>
-              📋 Paste Data
+            <button
+              ref={pasteButtonRef}
+              className={`reset-btn${pasteArmed ? ' paste-armed' : ''}`}
+              title={pasteArmed ? 'Press Ctrl+V (or your system paste shortcut) to load city data now' : undefined}
+              disabled={isLoading}
+              onClick={() => {
+                setPasteError(null);
+                setPasteArmed(true);
+                pasteButtonRef.current?.focus();
+              }}
+              onFocus={() => setPasteArmed(true)}
+              onBlur={() => setPasteArmed(false)}
+              onPaste={handleQuickPaste}
+            >
+              📝 {pasteArmed ? 'Paste Now' : 'Manual Paste'}
             </button>
           </div>
           <input
@@ -154,27 +175,8 @@ function AppContent() {
 
       {pasteError && <div className="paste-error-banner">{pasteError}</div>}
 
-      <nav className="tab-nav">
-        {([
-          ['production', '📊 Production'],
-          ['buildings', '🏠 Buildings'],
-          ['military', '⚔️ Military Units'],
-          ['grid', '🗺️ Grid Map'],
-          ['designer', '🧩 City Designer'],
-          ['greatbuildings', '🏛️ Great Buildings'],
-        ] as [Tab, string][]).map(([key, label]) => (
-          <button
-            key={key}
-            className={`tab-btn ${activeTab === key ? 'active' : ''}`}
-            onClick={() => { if (!isLoading) setActiveTab(key); }}
-            disabled={isLoading}
-          >
-            {label}
-          </button>
-        ))}
-      </nav>
-
       <main className="main-content" key={dataVersion}>
+        {activeTab === 'dashboard' && <Dashboard />}
         {activeTab === 'production' && <ProductionSummary />}
         {activeTab === 'buildings' && <BuildingTable />}
         {activeTab === 'military' && <MilitaryTable />}

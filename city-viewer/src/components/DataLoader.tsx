@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useCityData } from '../context/CityDataContext';
 import type { CityData } from '../types/citydata';
 
@@ -6,6 +6,8 @@ export default function DataLoader() {
   const { isLoading, setIsLoading, setData } = useCityData();
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [pasteArmed, setPasteArmed] = useState(false);
+  const pasteButtonRef = useRef<HTMLButtonElement>(null);
 
   const parseAndLoad = useCallback((text: string) => {
     try {
@@ -49,26 +51,27 @@ export default function DataLoader() {
     if (file) handleFile(file);
   }, [handleFile, isLoading]);
 
-  const handlePasteData = useCallback(async () => {
+  const handleQuickPaste = useCallback((e: React.ClipboardEvent<HTMLButtonElement>) => {
+    e.preventDefault();
     if (isLoading) return;
-    if (!navigator.clipboard?.readText) {
-      setError('Clipboard paste is not supported in this browser context.');
+
+    const text = e.clipboardData?.getData('text') ?? '';
+    if (!text.trim()) {
+      setError('Clipboard paste was empty.');
       return;
     }
 
     setIsLoading(true);
-    try {
-      const text = await navigator.clipboard.readText();
-      if (!text.trim()) {
-        setError('Clipboard is empty. Copy citydata.json content and try again.');
-        return;
+    // Let the loading UI paint before parsing very large JSON text.
+    window.setTimeout(() => {
+      try {
+        parseAndLoad(text);
+        setPasteArmed(false);
+        pasteButtonRef.current?.blur();
+      } finally {
+        setIsLoading(false);
       }
-      parseAndLoad(text);
-    } catch {
-      setError('Unable to read clipboard. Allow clipboard access and try again.');
-    } finally {
-      setIsLoading(false);
-    }
+    }, 0);
   }, [isLoading, parseAndLoad, setIsLoading]);
 
   return (
@@ -98,8 +101,22 @@ export default function DataLoader() {
                 hidden
               />
             </label>
-            <button type="button" className="paste-button" onClick={handlePasteData} disabled={isLoading}>
-              Paste Data
+            <button
+              ref={pasteButtonRef}
+              type="button"
+              className={`paste-button${pasteArmed ? ' paste-armed' : ''}`}
+              title={pasteArmed ? 'Press Ctrl+V (or your system paste shortcut) to load city data now' : undefined}
+              onClick={() => {
+                setError(null);
+                setPasteArmed(true);
+                pasteButtonRef.current?.focus();
+              }}
+              onFocus={() => setPasteArmed(true)}
+              onBlur={() => setPasteArmed(false)}
+              onPaste={handleQuickPaste}
+              disabled={isLoading}
+            >
+              {pasteArmed ? 'Paste Now' : 'Manual Paste'}
             </button>
           </div>
         </div>

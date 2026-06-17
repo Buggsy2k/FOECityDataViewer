@@ -347,6 +347,14 @@ body {
   cursor: not-allowed;
 }
 
+.paste-button.paste-armed,
+.reset-btn.paste-armed {
+  border-color: var(--gold);
+  color: #111;
+  background: var(--gold);
+  box-shadow: 0 0 0 2px rgba(255, 215, 0, 0.25);
+}
+
 .loader-inline-spinner {
   width: 22px;
   height: 22px;
@@ -376,11 +384,15 @@ body {
 .app-header {
   display: flex;
   align-items: center;
-  gap: 1.5rem;
+  gap: 1rem;
   padding: 0.75rem 1.5rem;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border);
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+}
+
+.header-left {
+  flex: 0 0 auto;
 }
 
 .header-left h1 {
@@ -389,35 +401,76 @@ body {
   white-space: nowrap;
 }
 
-.header-stats {
-  display: flex;
-  gap: 1.25rem;
-  flex-wrap: wrap;
-  flex: 1;
+.dashboard-summary {
+  padding: 1.25rem;
 }
-
-.stat {
-  font-size: 0.85rem;
+.dashboard-summary h2 {
+  margin-bottom: 1rem;
+}
+.dashboard-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.8rem;
+  margin-bottom: 1.1rem;
+}
+.dashboard-metric-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.8rem;
+  background: var(--bg-secondary);
+}
+.dashboard-metric-label {
+  font-size: 0.8rem;
   color: var(--text-secondary);
-  white-space: nowrap;
+  margin-bottom: 0.3rem;
 }
-
-.stat strong {
+.dashboard-metric-value {
+  font-size: 1.2rem;
+  font-weight: 700;
   color: var(--text-primary);
 }
-
-.fp-stat strong {
-  color: var(--gold);
+.dashboard-sections {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 0.8rem;
+}
+.dashboard-section-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.8rem;
+  background: var(--bg-secondary);
+}
+.dashboard-section-card h3 {
+  margin: 0 0 0.6rem;
+}
+.dashboard-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.dashboard-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.dashboard-list li:last-child {
+  border-bottom: none;
+}
+.dashboard-muted {
+  color: var(--text-secondary);
 }
 
 .reset-drop-zone {
-  display: inline-block;
+  flex: 0 0 auto;
+  margin-left: auto;
 }
 
 .header-actions {
   display: flex;
   gap: 0.5rem;
-  flex-wrap: wrap;
+  align-items: center;
 }
 
 .reset-drop-zone.drag-over .reset-btn {
@@ -461,38 +514,77 @@ body {
 /* ===== Tab Navigation ===== */
 .tab-nav {
   display: flex;
-  gap: 0;
-  background: var(--bg-secondary);
-  border-bottom: 2px solid var(--border);
-  padding: 0 1rem;
+  align-items: center;
+  gap: 0.35rem;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  padding: 0 0.5rem;
+  scrollbar-width: thin;
 }
 
 .tab-btn {
-  padding: 0.75rem 1.25rem;
+  padding: 0.45rem 0.7rem;
   background: transparent;
-  border: none;
+  border: 1px solid transparent;
+  border-radius: 8px;
   color: var(--text-secondary);
   cursor: pointer;
-  font-size: 0.9rem;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -2px;
+  font-size: 0.82rem;
+  white-space: nowrap;
+  position: relative;
   transition: all 0.2s;
 }
 
 .tab-btn:hover {
   color: var(--text-primary);
-  background: rgba(255,255,255,0.03);
+  background: rgba(255, 255, 255, 0.03);
+  border-color: var(--border);
 }
 
 .tab-btn.active {
-  color: var(--accent);
-  border-bottom-color: var(--accent);
+  color: var(--text-primary);
+  background: transparent;
+  border-color: transparent;
+  font-weight: 600;
+}
+
+.tab-btn.active::after {
+  content: '';
+  position: absolute;
+  left: 0.7rem;
+  right: 0.7rem;
+  bottom: 0;
+  height: 2px;
+  background: var(--gold);
+  border-radius: 999px;
 }
 
 /* ===== Fullscreen Mode ===== */
 .app.designer-fullscreen .app-header,
 .app.designer-fullscreen .tab-nav {
   display: none;
+}
+
+@media (max-width: 980px) {
+  .app-header {
+    gap: 0.6rem;
+    padding: 0.6rem 0.8rem;
+  }
+
+  .header-left h1 {
+    font-size: 1rem;
+  }
+
+  .tab-btn {
+    font-size: 0.76rem;
+    padding: 0.35rem 0.5rem;
+  }
+
+  .reset-btn {
+    padding: 0.35rem 0.6rem;
+    font-size: 0.72rem;
+  }
 }
 
 .app.designer-fullscreen .main-content {
