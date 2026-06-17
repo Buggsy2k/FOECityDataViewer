@@ -90,7 +90,7 @@ export default function CityGrid() {
     for (const b of allBuildings) {
       if (hiddenTypes.has(b.entry.type)) continue;
       if (b.entry.type === 'street' && hiddenStreetEras.has(getStreetEra(b.entry.cityentity_id))) continue;
-      sizes.add(`${b.width}x${b.length}`);
+      sizes.add(`${b.length}x${b.width}`);
     }
     return [...sizes].sort((a, b) => {
       const [aw, al] = a.split('x').map(Number);
@@ -331,7 +331,7 @@ export default function CityGrid() {
   const buildings = useMemo(() => {
     return allBuildings.filter(b => {
       if (hiddenTypes.has(b.entry.type)) return false;
-      if (hiddenSizes.size > 0 && hiddenSizes.has(`${b.width}x${b.length}`)) return false;
+      if (hiddenSizes.size > 0 && hiddenSizes.has(`${b.length}x${b.width}`)) return false;
       if (b.entry.type === 'street' && hiddenStreetEras.has(getStreetEra(b.entry.cityentity_id))) return false;
       return true;
     });

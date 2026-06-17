@@ -125,7 +125,7 @@ function sizeArea(sizeKey: string): number {
 
 function getPlaceholderDefaultName(width: number, length: number, roadNeed: RoadNeed): string {
   const roadLevel = roadNeed === 'road2' ? 2 : roadNeed === 'road1' ? 1 : 0;
-  return `${width}x${length} r-${roadLevel}`;
+  return `${length}x${width} r-${roadLevel}`;
 }
 
 export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isFullscreen: boolean; onFullscreenChange: (fullscreen: boolean) => void }) {
@@ -279,7 +279,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
     if (!data) return [];
     return getPlacedBuildings(data).map((b) => ({
       ...b,
-      sizeKey: `${b.width}x${b.length}`,
+      sizeKey: `${b.length}x${b.width}`,
       roadNeed: getRoadNeed(b),
     }));
   }, [data, getRoadNeed]);
@@ -305,7 +305,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
         y: 0,
         width: tpl.width,
         length: tpl.length,
-        sizeKey: `${tpl.width}x${tpl.length}`,
+        sizeKey: `${tpl.length}x${tpl.width}`,
         roadNeed: tpl.roadNeed,
       });
     }
@@ -418,6 +418,42 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
       });
     }
   }, [bounds, viewBox]);
+
+  const fitToScreen = useCallback(() => {
+    if (!bounds) return;
+
+    const pad = 2;
+    const mapX = (bounds.minX - pad) * CELL_SIZE;
+    const mapY = (bounds.minY - pad) * CELL_SIZE;
+    const mapW = (bounds.width + pad * 2) * CELL_SIZE;
+    const mapH = (bounds.height + pad * 2) * CELL_SIZE;
+
+    const wrapper = wrapperRef.current;
+    const wrapperW = wrapper?.clientWidth ?? 0;
+    const wrapperH = wrapper?.clientHeight ?? 0;
+    if (wrapperW <= 0 || wrapperH <= 0 || mapW <= 0 || mapH <= 0) {
+      setViewBox({ x: mapX, y: mapY, w: mapW, h: mapH });
+      return;
+    }
+
+    const mapAspect = mapW / mapH;
+    const wrapperAspect = wrapperW / wrapperH;
+
+    let viewW = mapW;
+    let viewH = mapH;
+    if (wrapperAspect > mapAspect) {
+      viewW = mapH * wrapperAspect;
+    } else {
+      viewH = mapW / wrapperAspect;
+    }
+
+    setViewBox({
+      x: mapX - (viewW - mapW) / 2,
+      y: mapY - (viewH - mapH) / 2,
+      w: viewW,
+      h: viewH,
+    });
+  }, [bounds]);
 
   const presentTypes = useMemo(() => {
     const types = new Set<string>();
@@ -1624,9 +1660,9 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
     return [...placeholderTemplates].sort((a, b) => {
       const areaDiff = (a.width * a.length) - (b.width * b.length);
       if (areaDiff !== 0) return areaDiff;
-      const firstNumberDiff = a.width - b.width;
+      const firstNumberDiff = a.length - b.length;
       if (firstNumberDiff !== 0) return firstNumberDiff;
-      const secondNumberDiff = a.length - b.length;
+      const secondNumberDiff = a.width - b.width;
       if (secondNumberDiff !== 0) return secondNumberDiff;
       return a.name.localeCompare(b.name);
     });
@@ -2103,6 +2139,14 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
           >
             📍
           </button>
+          <button
+            className="grid-dropdown-btn designer-icon-btn"
+            title="Fit map to available space"
+            onClick={fitToScreen}
+            aria-label="Fit map to available space"
+          >
+            ⤢
+          </button>
           <div className="grid-search designer-map-search">
             <input
               type="text"
@@ -2123,17 +2167,19 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
               </button>
             )}
           </div>
-          <span className="grid-search-count">{mapSearchMatchCount} on map</span>
-          <span className="designer-changes-summary">
-            {changedTotalCount} changed ({parkedIds.size} parked)
-          </span>
-          {validationRan && (
-            <span className={`designer-validation-status ${validationInvalidIds.size > 0 ? 'invalid' : 'valid'}`}>
-              {validationInvalidIds.size > 0
-                ? `${validationInvalidIds.size} invalid`
-                : 'All valid'}
+          <div className="designer-summary-group">
+            <span className="grid-search-count">{mapSearchMatchCount} on map</span>
+            <span className="designer-changes-summary">
+              {changedTotalCount} changed ({parkedIds.size} parked)
             </span>
-          )}
+            {validationRan && (
+              <span className={`designer-validation-status ${validationInvalidIds.size > 0 ? 'invalid' : 'valid'}`}>
+                {validationInvalidIds.size > 0
+                  ? `${validationInvalidIds.size} invalid`
+                  : 'All valid'}
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
@@ -2164,6 +2210,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
               </button>
             </div>
           </div>
+          <div className="designer-panel-content">
           <div className="designer-staging-filters">
             <div className="grid-dropdown" ref={typeDropdownRef}>
               <button className="grid-dropdown-btn" onClick={() => setTypeDropdownOpen(v => !v)}>
@@ -2244,7 +2291,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
             <div className="grid-search">
               <input
                 type="text"
-                placeholder="Search staged buildings..."
+                placeholder="Search staged"
                 value={searchText}
                 onChange={e => setSearchText(e.target.value)}
                 className="grid-search-input"
@@ -2270,8 +2317,6 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
               Clear Filters
             </button>
           </div>
-          <p>Drag buildings here to get them out of the way, then drag them back onto the map.</p>
-
           <div className="designer-metrics">
             <div><strong>{parkedIds.size}</strong> parked</div>
             <div><strong>{placedCount}</strong> on map</div>
@@ -2335,15 +2380,19 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
               );
             })}
             {parkedStacks.length === 0 && (
-              <div className="designer-empty">No parked buildings match the selected filters.</div>
+              <div className="designer-empty">
+                No parked or no buildings match the selected filters.
+                <br />
+                Drag buildings here to get them out of the way, then drag them back onto the map.
+              </div>
             )}
           </div>
 
-          <div className="designer-versions">
+          <div className="designer-versions designer-section">
             <div className="designer-versions-header">
               <h4>Saved Versions</h4>
               <div className="designer-version-actions">
-                <button className="grid-dropdown-btn" onClick={saveLayout}>Save Version</button>
+                <button className="grid-dropdown-btn" onClick={saveLayout} title="Save the current version of the map">Save</button>
                 <button className="grid-dropdown-btn" onClick={() => importLayoutInputRef.current?.click()}>Import</button>
                 <input
                   ref={importLayoutInputRef}
@@ -2377,7 +2426,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
             </div>
           </div>
 
-          <div className="designer-placeholder-box">
+          <div className="designer-placeholder-box designer-section">
             <div className="designer-placeholder-title">Custom Placeholders</div>
             <div className="designer-placeholder-form">
               <input
@@ -2395,19 +2444,19 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
                 <input
                   type="number"
                   min={1}
-                  value={placeholderWidth}
+                  value={placeholderLength}
                   className="designer-small-input"
-                  onChange={e => setPlaceholderWidth(Math.max(1, Number(e.target.value) || 1))}
-                  title="Width"
+                  onChange={e => setPlaceholderLength(Math.max(1, Number(e.target.value) || 1))}
+                  title="Height"
                 />
                 <span className="designer-x-sep">x</span>
                 <input
                   type="number"
                   min={1}
-                  value={placeholderLength}
+                  value={placeholderWidth}
                   className="designer-small-input"
-                  onChange={e => setPlaceholderLength(Math.max(1, Number(e.target.value) || 1))}
-                  title="Length"
+                  onChange={e => setPlaceholderWidth(Math.max(1, Number(e.target.value) || 1))}
+                  title="Width"
                 />
               </div>
               <select
@@ -2428,20 +2477,12 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
               <div className="designer-placeholder-list">
                 {sortedPlaceholderTemplates.map(tpl => (
                   <div key={tpl.id} className="designer-placeholder-row">
-                    <span>
-                      {tpl.name} ({tpl.width}x{tpl.length}, {ROAD_NEED_LABELS[tpl.roadNeed]})
+                    <span title={`${tpl.name} (${tpl.length}x${tpl.width}, ${ROAD_NEED_LABELS[tpl.roadNeed]}) [${placeholderCountsByTemplate.get(tpl.id)?.parked ?? 0} staged / ${placeholderCountsByTemplate.get(tpl.id)?.total ?? 0} total]`}>
+                      {tpl.name} ({tpl.length}x{tpl.width}, {ROAD_NEED_LABELS[tpl.roadNeed]})
                       {' '}
                       [{placeholderCountsByTemplate.get(tpl.id)?.parked ?? 0} staged / {placeholderCountsByTemplate.get(tpl.id)?.total ?? 0} total]
                     </span>
                     <div className="designer-placeholder-actions">
-                      <button
-                        className="designer-mini-icon-btn"
-                        onClick={() => addPlaceholderToStaging(tpl.id)}
-                        title="Add one to staging"
-                        aria-label="Add one to staging"
-                      >
-                        +
-                      </button>
                       <button
                         className="designer-mini-icon-btn danger"
                         onClick={() => deletePlaceholder(tpl.id)}
@@ -2449,6 +2490,14 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
                         aria-label="Delete placeholder template"
                       >
                         ×
+                      </button>
+                      <button
+                        className="designer-mini-icon-btn"
+                        onClick={() => addPlaceholderToStaging(tpl.id)}
+                        title="Add one to staging"
+                        aria-label="Add one to staging"
+                      >
+                        +
                       </button>
                     </div>
                   </div>
@@ -2458,6 +2507,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
             {placeholderTemplates.length === 0 && (
               <div className="designer-empty">No custom placeholders yet.</div>
             )}
+          </div>
           </div>
         </aside>
 
@@ -2734,7 +2784,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
                 : { background: color }}
             />
             <span className="designer-drag-ghost-label">{name}</span>
-            <span className="designer-drag-ghost-size">{b.width}×{b.length}</span>
+            <span className="designer-drag-ghost-size">{b.length}×{b.width}</span>
           </div>
         );
       })()}

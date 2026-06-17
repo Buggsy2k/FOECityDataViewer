@@ -27,10 +27,10 @@ import {
 import type { CityData, ResourceMap } from '../types/citydata';
 
 function getBuildingSize(entity: CityEntity): string {
-  if (entity.width && entity.length) return `${entity.width}×${entity.length}`;
+  if (entity.width && entity.length) return `${entity.length}×${entity.width}`;
   const allAge = entity.components?.AllAge as Record<string, unknown> | undefined;
   const placement = allAge?.placement as { size?: { x?: number; y?: number } } | undefined;
-  if (placement?.size?.x && placement?.size?.y) return `${placement.size.x}×${placement.size.y}`;
+  if (placement?.size?.x && placement?.size?.y) return `${placement.size.y}×${placement.size.x}`;
   return '—';
 }
 
