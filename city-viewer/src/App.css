@@ -1887,6 +1887,10 @@ body {
   background: rgba(231, 76, 60, 0.08);
 }
 
+.designer-item.no-available {
+  cursor: default;
+}
+
 .designer-changes-summary {
   font-size: 0.76rem;
   color: var(--text-secondary);
@@ -1979,6 +1983,12 @@ body {
   white-space: nowrap;
 }
 
+.designer-item-count.deleted {
+  color: rgba(231, 76, 60, 0.95);
+  border-color: rgba(231, 76, 60, 0.6);
+  background: rgba(231, 76, 60, 0.18);
+}
+
 .designer-item-actions {
   display: inline-flex;
   align-items: center;
@@ -1992,9 +2002,9 @@ body {
   align-items: center;
   justify-content: center;
   border-radius: 4px;
-  border: 1px solid rgba(231, 76, 60, 0.45);
-  background: rgba(231, 76, 60, 0.12);
-  color: #f0b6b1;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary);
   font-size: 0.82rem;
   line-height: 1;
   cursor: pointer;
@@ -2003,8 +2013,44 @@ body {
 
 .designer-item-icon-btn:hover,
 .designer-item-icon-btn:focus {
+  border-color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.08);
+  outline: none;
+}
+
+.designer-item-icon-btn.delete-toggle {
+  border-color: rgba(231, 76, 60, 0.45);
+  background: rgba(231, 76, 60, 0.12);
+  color: #f0b6b1;
+}
+
+.designer-item-icon-btn.delete-toggle:hover,
+.designer-item-icon-btn.delete-toggle:focus {
   border-color: rgba(231, 76, 60, 0.72);
   background: rgba(231, 76, 60, 0.2);
+}
+
+.designer-item-icon-btn.restore-toggle {
+  border-color: rgba(88, 214, 141, 0.45);
+  background: rgba(88, 214, 141, 0.12);
+  color: rgba(88, 214, 141, 0.95);
+}
+
+.designer-item-icon-btn.restore-toggle:hover,
+.designer-item-icon-btn.restore-toggle:focus {
+  border-color: rgba(88, 214, 141, 0.72);
+  background: rgba(88, 214, 141, 0.2);
+}
+
+.designer-item-icon-btn.disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.designer-item-icon-btn.disabled:hover,
+.designer-item-icon-btn.disabled:focus {
+  border-color: rgba(231, 76, 60, 0.45);
+  background: rgba(231, 76, 60, 0.12);
   outline: none;
 }
 

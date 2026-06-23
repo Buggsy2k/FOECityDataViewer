@@ -50,7 +50,10 @@ interface SavedLayout {
 
 interface ParkedStack {
   key: string;
-  id: number;
+  cityentityId: string;
+  status: 'available' | 'deleted';
+  dragId: number | null;
+  ids: number[];
   name: string;
   era: string;
   sizeKey: string;
@@ -59,7 +62,6 @@ interface ParkedStack {
   count: number;
   isPlaceholder: boolean;
   placeholderTemplateId?: number;
-  markedForDeletion: boolean;
 }
 
 interface LayoutSnapshot {
@@ -138,6 +140,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
   const historyRef = useRef<LayoutSnapshot[]>([]);
   const positionsRef = useRef<Map<number, { x: number; y: number }>>(new Map());
   const parkedIdsRef = useRef<Set<number>>(new Set());
+  const markedForDeletionIdsRef = useRef<Set<number>>(new Set());
 
   const [viewBox, setViewBox] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const [isPanning, setIsPanning] = useState(false);
@@ -357,6 +360,20 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
   useEffect(() => {
     parkedIdsRef.current = parkedIds;
   }, [parkedIds]);
+
+  useEffect(() => {
+    markedForDeletionIdsRef.current = markedForDeletionIds;
+  }, [markedForDeletionIds]);
+
+  useEffect(() => {
+    setMarkedForDeletionIds(prev => {
+      const next = new Set<number>();
+      prev.forEach(id => {
+        if (parkedIds.has(id) && buildingById.has(id)) next.add(id);
+      });
+      return next.size === prev.size ? prev : next;
+    });
+  }, [parkedIds, buildingById]);
 
   const applyLayoutSnapshot = useCallback((snapshot: LayoutSnapshot) => {
     setPositions(() => {
@@ -1201,7 +1218,8 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
           const nextB = allBuildingsRef.current.find(
             b => b.entry.cityentity_id === dragState.cityentityId &&
                  b.entry.id !== dragState.id &&
-                 parkedIdsRef.current.has(b.entry.id)
+                 parkedIdsRef.current.has(b.entry.id) &&
+                 !markedForDeletionIdsRef.current.has(b.entry.id)
           );
           if (nextB) {
             const mx = mousePositionRef.current.x;
@@ -1444,6 +1462,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
     if (!source) return;
     
     const isParked = parkedIds.has(buildingId);
+    if (isParked && markedForDeletionIds.has(buildingId)) return;
     
     // Allow switching between parked items, but not from placed to parked
     if (dragState && !(isParked && dragState.originParked)) return;
@@ -1479,7 +1498,11 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
     const lineIds: number[] = [];
     if (isStreet && isParked) {
       for (const b of allBuildings) {
-        if (b.entry.cityentity_id === source.entry.cityentity_id && parkedIds.has(b.entry.id)) {
+        if (
+          b.entry.cityentity_id === source.entry.cityentity_id &&
+          parkedIds.has(b.entry.id) &&
+          !markedForDeletionIds.has(b.entry.id)
+        ) {
           lineIds.push(b.entry.id);
         }
       }
@@ -1527,7 +1550,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
       lineCells: null,
       lineIds,
     });
-  }, [buildingById, positions, parkedIds, allBuildings, dragState, selectedIds, canPlaceGroup]);
+  }, [buildingById, positions, parkedIds, markedForDeletionIds, allBuildings, dragState, selectedIds, canPlaceGroup]);
 
   const finishSelectionRegion = useCallback((region: SelectionRegion) => {
     const minX = Math.min(region.start.x, region.end.x);
@@ -1775,6 +1798,12 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
       next.delete(removeId);
       return next;
     });
+    setMarkedForDeletionIds(prev => {
+      if (!prev.has(removeId)) return prev;
+      const next = new Set(prev);
+      next.delete(removeId);
+      return next;
+    });
     if (dragState?.id === removeId) setDragState(null);
   }, [placeholderInstances, parkedIds, dragState]);
 
@@ -1808,6 +1837,14 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
       removeIds.forEach(id => next.delete(id));
       return next;
     });
+    setMarkedForDeletionIds(prev => {
+      let changed = false;
+      const next = new Set(prev);
+      removeIds.forEach(id => {
+        if (next.delete(id)) changed = true;
+      });
+      return changed ? next : prev;
+    });
     if (dragState && removeIds.has(dragState.id)) setDragState(null);
   }, [placeholderInstances, parkedIds, dragState]);
 
@@ -1821,13 +1858,22 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
     });
   }, [recordHistory]);
 
-  const toggleMarkedForDeletion = useCallback((buildingId: number) => {
+  const adjustMarkedForDeletionCount = useCallback((stack: ParkedStack, direction: 'mark' | 'unmark') => {
+    const candidates = direction === 'mark'
+      ? (stack.status === 'available' ? stack.ids : [])
+      : (stack.status === 'deleted' ? stack.ids : []);
+    if (candidates.length === 0) return;
+
+    const targetId = direction === 'mark'
+      ? Math.min(...candidates)
+      : Math.max(...candidates);
+
     setMarkedForDeletionIds(prev => {
       const next = new Set(prev);
-      if (next.has(buildingId)) {
-        next.delete(buildingId);
+      if (direction === 'mark') {
+        next.add(targetId);
       } else {
-        next.add(buildingId);
+        next.delete(targetId);
       }
       return next;
     });
@@ -2044,7 +2090,18 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
   const parkedStacks = useMemo<ParkedStack[]>(() => {
     if (!data) return [];
 
-    const grouped = new Map<string, ParkedStack>();
+    const grouped = new Map<string, {
+      cityentityId: string;
+      name: string;
+      era: string;
+      sizeKey: string;
+      roadNeed: RoadNeed;
+      type: string;
+      isPlaceholder: boolean;
+      placeholderTemplateId?: number;
+      availableIds: number[];
+      deletedIds: number[];
+    }>();
     for (const building of allBuildings) {
       if (!parkedIds.has(building.entry.id)) continue;
       if (!matchesFilters(building)) continue;
@@ -2054,32 +2111,76 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
       const placeholderTemplate = getPlaceholderForBuildingId(building.entry.id);
       const key = `${building.entry.cityentity_id}::${era}`;
       const existing = grouped.get(key);
+      const isMarked = markedForDeletionIds.has(building.entry.id);
 
       if (existing) {
-        existing.count += 1;
-        if (building.entry.id < existing.id) existing.id = building.entry.id;
+        if (isMarked) {
+          existing.deletedIds.push(building.entry.id);
+        } else {
+          existing.availableIds.push(building.entry.id);
+        }
         continue;
       }
 
       grouped.set(key, {
-        key,
-        id: building.entry.id,
+        cityentityId: building.entry.cityentity_id,
         name,
         era,
         sizeKey: building.sizeKey,
         roadNeed: building.roadNeed,
         type: building.entry.type,
-        count: 1,
+        availableIds: isMarked ? [] : [building.entry.id],
+        deletedIds: isMarked ? [building.entry.id] : [],
         isPlaceholder: !!placeholderTemplate,
         placeholderTemplateId: placeholderTemplate?.id,
-        markedForDeletion: markedForDeletionIds.has(building.entry.id),
       });
     }
 
-    return [...grouped.values()].sort((a, b) => {
+    const rows: ParkedStack[] = [];
+    grouped.forEach((group, baseKey) => {
+      if (group.availableIds.length > 0) {
+        const availableIds = [...group.availableIds].sort((a, b) => a - b);
+        rows.push({
+          key: `${baseKey}::available`,
+          cityentityId: group.cityentityId,
+          status: 'available',
+          dragId: availableIds[0] ?? null,
+          ids: availableIds,
+          name: group.name,
+          era: group.era,
+          sizeKey: group.sizeKey,
+          roadNeed: group.roadNeed,
+          type: group.type,
+          count: availableIds.length,
+          isPlaceholder: group.isPlaceholder,
+          placeholderTemplateId: group.placeholderTemplateId,
+        });
+      }
+
+      if (group.deletedIds.length > 0) {
+        const deletedIds = [...group.deletedIds].sort((a, b) => a - b);
+        rows.push({
+          key: `${baseKey}::deleted`,
+          cityentityId: group.cityentityId,
+          status: 'deleted',
+          dragId: null,
+          ids: deletedIds,
+          name: group.name,
+          era: group.era,
+          sizeKey: group.sizeKey,
+          roadNeed: group.roadNeed,
+          type: group.type,
+          count: deletedIds.length,
+          isPlaceholder: group.isPlaceholder,
+          placeholderTemplateId: group.placeholderTemplateId,
+        });
+      }
+    });
+
+    return rows.sort((a, b) => {
       // Keep marked-for-deletion items at the bottom regardless of sort mode
-      if (a.markedForDeletion && !b.markedForDeletion) return 1;
-      if (!a.markedForDeletion && b.markedForDeletion) return -1;
+      if (a.status === 'deleted' && b.status !== 'deleted') return 1;
+      if (a.status !== 'deleted' && b.status === 'deleted') return -1;
 
       const direction = parkedSortDirection === 'asc' ? 1 : -1;
 
@@ -2365,18 +2466,21 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
               return (
                 <button
                   key={stack.key}
-                  className={`designer-item parked${dragState?.id === stack.id || (dragState?.originParked && dragState?.cityentityId === stack.key.split('::')[0]) ? ' active-drag' : ''}${stack.markedForDeletion ? ' marked-for-deletion' : ''}`}
+                  className={`designer-item parked${(dragState?.id != null && stack.ids.includes(dragState.id)) || (stack.status === 'available' && dragState?.originParked && dragState?.cityentityId === stack.cityentityId) ? ' active-drag' : ''}${stack.status === 'deleted' ? ' marked-for-deletion no-available' : ''}`}
                   onClick={(e) => {
-                    if (dragState?.originParked && dragState.id === stack.id) {
+                    if (dragState?.originParked && dragState.id != null && stack.ids.includes(dragState.id)) {
                       e.preventDefault();
                       e.stopPropagation();
                       setDragState(null);
                       setIsPanning(false);
                       return;
                     }
-                    startDrag(e, stack.id);
+                    if (stack.dragId == null) return;
+                    startDrag(e, stack.dragId);
                   }}
-                  title="Click to pick up and place, click again to unselect, or click another item to switch"
+                  title={stack.status === 'available'
+                    ? 'Click to pick up and place, click again to unselect, or click another item to switch'
+                    : 'This copy is marked for deletion and cannot be dragged'}
                 >
                   <span
                     className="designer-item-color"
@@ -2389,27 +2493,53 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
                   />
                   <span className="designer-item-name">{stack.name}</span>
                   <span className="designer-item-actions">
-                    <span className="designer-item-count">x{stack.count}</span>
-                    <span
-                      className={`designer-item-icon-btn delete-toggle${stack.markedForDeletion ? ' active' : ''}`}
-                      role="button"
-                      tabIndex={0}
-                      title={stack.markedForDeletion ? "Unmark for deletion - will return to pool" : "Mark for deletion - to permanently remove"}
-                      aria-label={stack.markedForDeletion ? "Unmark for deletion" : "Mark for deletion"}
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        toggleMarkedForDeletion(stack.id);
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key !== 'Enter' && e.key !== ' ') return;
-                        e.preventDefault();
-                        e.stopPropagation();
-                        toggleMarkedForDeletion(stack.id);
-                      }}
-                    >
-                      ✕
+                    <span className={`designer-item-count${stack.status === 'deleted' ? ' deleted' : ''}`}>
+                      {stack.status === 'available' ? 'A' : 'D'} {stack.count}
                     </span>
+                    {stack.status === 'available' && (
+                      <span
+                        className="designer-item-icon-btn delete-toggle"
+                        role="button"
+                        tabIndex={0}
+                        title="Mark one staged copy for deletion"
+                        aria-label="Mark one staged copy for deletion"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          adjustMarkedForDeletionCount(stack, 'mark');
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key !== 'Enter' && e.key !== ' ') return;
+                          e.preventDefault();
+                          e.stopPropagation();
+                          adjustMarkedForDeletionCount(stack, 'mark');
+                        }}
+                      >
+                        -
+                      </span>
+                    )}
+                    {stack.status === 'deleted' && (
+                      <span
+                        className="designer-item-icon-btn restore-toggle"
+                        role="button"
+                        tabIndex={0}
+                        title="Unmark one copy so it can be placed again"
+                        aria-label="Unmark one copy so it can be placed again"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          adjustMarkedForDeletionCount(stack, 'unmark');
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key !== 'Enter' && e.key !== ' ') return;
+                          e.preventDefault();
+                          e.stopPropagation();
+                          adjustMarkedForDeletionCount(stack, 'unmark');
+                        }}
+                      >
+                        +
+                      </span>
+                    )}
                     {stack.isPlaceholder && stack.placeholderTemplateId != null && (
                       <span
                         className="designer-item-icon-btn"
