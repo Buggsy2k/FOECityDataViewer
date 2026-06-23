@@ -1881,6 +1881,12 @@ body {
   box-shadow: 0 0 0 2px rgba(88, 214, 141, 0.35);
 }
 
+.designer-item.marked-for-deletion {
+  border-color: rgba(231, 76, 60, 0.8);
+  border-width: 2px;
+  background: rgba(231, 76, 60, 0.08);
+}
+
 .designer-changes-summary {
   font-size: 0.76rem;
   color: var(--text-secondary);
@@ -2000,6 +2006,12 @@ body {
   border-color: rgba(231, 76, 60, 0.72);
   background: rgba(231, 76, 60, 0.2);
   outline: none;
+}
+
+.designer-item-icon-btn.delete-toggle.active {
+  border-color: rgba(231, 76, 60, 0.85);
+  background: rgba(231, 76, 60, 0.35);
+  color: #ff7d7d;
 }
 
 .designer-empty {
