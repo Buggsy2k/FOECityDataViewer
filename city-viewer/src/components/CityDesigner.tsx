@@ -164,6 +164,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
   const [hiddenRoadNeeds, setHiddenRoadNeeds] = useState<Set<RoadNeed>>(new Set());
   const [searchText, setSearchText] = useState('');
   const [mapSearchText, setMapSearchText] = useState('');
+  const [mapHiddenSizes, setMapHiddenSizes] = useState<Set<string>>(new Set());
   const [showChangedHighlights, setShowChangedHighlights] = useState(false);
   const [parkedSortMode, setParkedSortMode] = useState<ParkedSortMode>('name');
   const [parkedSortDirection, setParkedSortDirection] = useState<SortDirection>('asc');
@@ -197,9 +198,11 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
   const [typeDropdownOpen, setTypeDropdownOpen] = useState(false);
   const [sizeDropdownOpen, setSizeDropdownOpen] = useState(false);
   const [roadDropdownOpen, setRoadDropdownOpen] = useState(false);
+  const [mapSizeDropdownOpen, setMapSizeDropdownOpen] = useState(false);
   const typeDropdownRef = useRef<HTMLDivElement>(null);
   const sizeDropdownRef = useRef<HTMLDivElement>(null);
   const roadDropdownRef = useRef<HTMLDivElement>(null);
+  const mapSizeDropdownRef = useRef<HTMLDivElement>(null);
   const importLayoutInputRef = useRef<HTMLInputElement>(null);
 
   const placeholderTemplateById = useMemo(() => {
@@ -516,17 +519,36 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
       .filter(b => Number.isFinite(b.x) && Number.isFinite(b.y));
   }, [allBuildings, parkedIds, positions]);
 
+  const mapPresentSizes = useMemo(() => {
+    const sizes = new Set<string>();
+    for (const b of mapBuildings) sizes.add(b.sizeKey);
+    return [...sizes].sort((a, b) => {
+      const [aw, ah] = a.split('x').map(Number);
+      const [bw, bh] = b.split('x').map(Number);
+      return aw * ah - bw * bh || aw - bw;
+    });
+  }, [mapBuildings]);
+
+  const mapHiddenPresentCount = useMemo(
+    () => mapPresentSizes.filter(size => mapHiddenSizes.has(size)).length,
+    [mapPresentSizes, mapHiddenSizes],
+  );
+
+  const mapSizeFilterActive = mapPresentSizes.length > 0 && mapHiddenPresentCount > 0;
+
   const mapSearchQuery = mapSearchText.trim().toLowerCase();
+  const mapSearchActive = mapSearchQuery.length > 0;
 
   const mapSearchMatchCount = useMemo(() => {
-    if (!mapSearchQuery) return mapBuildings.length;
     let count = 0;
     for (const b of mapBuildings) {
+      const matchesMapSize = !mapSizeFilterActive || !mapHiddenSizes.has(b.sizeKey);
       const name = getDesignerBuildingName(b).toLowerCase();
-      if (name.includes(mapSearchQuery)) count++;
+      const matchesMapSearch = !mapSearchActive || name.includes(mapSearchQuery);
+      if (matchesMapSize && matchesMapSearch) count++;
     }
     return count;
-  }, [mapBuildings, mapSearchQuery, getDesignerBuildingName]);
+  }, [mapBuildings, mapSizeFilterActive, mapHiddenSizes, mapSearchActive, mapSearchQuery, getDesignerBuildingName]);
 
   const computeRoadConnectivity = useCallback((placed: DesignerBuilding[]) => {
     const streetByCellAny = new Map<string, number>();
@@ -1322,6 +1344,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
       if (typeDropdownRef.current && !typeDropdownRef.current.contains(e.target as Node)) setTypeDropdownOpen(false);
       if (sizeDropdownRef.current && !sizeDropdownRef.current.contains(e.target as Node)) setSizeDropdownOpen(false);
       if (roadDropdownRef.current && !roadDropdownRef.current.contains(e.target as Node)) setRoadDropdownOpen(false);
+      if (mapSizeDropdownRef.current && !mapSizeDropdownRef.current.contains(e.target as Node)) setMapSizeDropdownOpen(false);
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
@@ -1680,6 +1703,14 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
     setHiddenRoadNeeds(prev => {
       const next = new Set(prev);
       if (next.has(need)) next.delete(need); else next.add(need);
+      return next;
+    });
+  };
+
+  const toggleMapSize = (size: string) => {
+    setMapHiddenSizes(prev => {
+      const next = new Set(prev);
+      if (next.has(size)) next.delete(size); else next.add(size);
       return next;
     });
   };
@@ -2306,6 +2337,35 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
               </button>
             )}
           </div>
+          <div className="grid-dropdown" ref={mapSizeDropdownRef}>
+            <button className="grid-dropdown-btn" onClick={() => setMapSizeDropdownOpen(v => !v)}>
+              {(() => {
+                if (mapPresentSizes.length === 0 || mapHiddenPresentCount === 0) return 'All Sizes';
+                return `${mapPresentSizes.length - mapHiddenPresentCount} of ${mapPresentSizes.length} Sizes`;
+              })()}
+              <span className="grid-dropdown-arrow">{mapSizeDropdownOpen ? '\u25B2' : '\u25BC'}</span>
+            </button>
+            {mapSizeDropdownOpen && (
+              <div className="grid-dropdown-menu">
+                <label className="grid-dropdown-item grid-dropdown-all">
+                  <input
+                    type="checkbox"
+                    checked={mapHiddenPresentCount === 0}
+                    onChange={() => {
+                      setMapHiddenSizes(mapHiddenPresentCount === 0 ? new Set(mapPresentSizes) : new Set());
+                    }}
+                  />
+                  All
+                </label>
+                {mapPresentSizes.map(size => (
+                  <label key={`map-size-${size}`} className="grid-dropdown-item">
+                    <input type="checkbox" checked={!mapHiddenSizes.has(size)} onChange={() => toggleMapSize(size)} />
+                    {size}
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
           <div className="designer-summary-group">
             <span className="grid-search-count">{mapSearchMatchCount} on map</span>
             <span className="designer-changes-summary">
@@ -2756,6 +2816,9 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
             {mapBuildings.filter(b => !dragState?.groupIds.includes(b.entry.id)).map(b => {
               const fullName = getDesignerBuildingName(b);
               const matchesMapSearch = !mapSearchQuery || fullName.toLowerCase().includes(mapSearchQuery);
+              const matchesMapSize = !mapSizeFilterActive || !mapHiddenSizes.has(b.sizeKey);
+              const mapFilterActive = mapSearchActive || mapSizeFilterActive;
+              const matchesMapFilters = matchesMapSearch && matchesMapSize;
               const showNameTooltip = b.entry.type !== 'street' && isLabelLikelyClipped(fullName, b.width, b.length);
               return (
               <g key={b.entry.id}>
@@ -2771,13 +2834,13 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
                       ? 'rgba(255, 159, 28, 0.98)'
                       : isSelected
                         ? 'rgba(241, 196, 15, 0.95)'
-                      : (mapSearchQuery && matchesMapSearch)
+                      : (mapFilterActive && matchesMapFilters)
                         ? 'rgba(0, 234, 255, 0.98)'
                         : 'rgba(0,0,0,0.35)';
                   const strokeW = isInvalid ? 2 : (isChangedLocation ? 1.9 : (isSelected ? 1.6 : 0.6));
                   const baseOpacity = isPlaceholder ? 0.96 : 0.85;
-                  const fillOpacity = mapSearchQuery
-                    ? (matchesMapSearch ? 1 : 0.22)
+                  const fillOpacity = mapFilterActive
+                    ? (matchesMapFilters ? 1 : 0.22)
                     : baseOpacity;
                   return (
                 <rect
