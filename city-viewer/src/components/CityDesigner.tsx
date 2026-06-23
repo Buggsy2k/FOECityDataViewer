@@ -2247,7 +2247,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
 
   const mapCursor = isPanning
     ? 'grabbing'
-    : (dragState?.originParked ? 'crosshair' : 'default');
+    : (dragState ? 'all-scroll' : 'default');
 
   const isLabelLikelyClipped = useCallback((name: string, width: number, length: number): boolean => {
     const cells = width * length;
@@ -2873,7 +2873,11 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
                     }
                     startDrag(e, b.entry.id);
                   }}
-                  style={{ cursor: dragState?.id === b.entry.id ? 'grabbing' : 'move' }}
+                  style={{
+                    cursor: isPanning
+                      ? 'grabbing'
+                      : (dragState ? 'all-scroll' : 'default')
+                  }}
                 />
                   );
                 })()}

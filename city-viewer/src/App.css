@@ -1870,6 +1870,17 @@ body {
   border-color: var(--text-secondary);
 }
 
+.designer-item:focus,
+.designer-item:focus-visible {
+  outline: none;
+}
+
+.designer-item.parked:focus,
+.designer-item.parked:focus-visible {
+  border-color: rgba(74, 144, 217, 0.55);
+  box-shadow: 0 0 0 1px rgba(74, 144, 217, 0.35);
+}
+
 .designer-item.parked {
   border-color: rgba(74, 144, 217, 0.55);
   background: rgba(74, 144, 217, 0.12);
@@ -1878,6 +1889,13 @@ body {
 .designer-item.active-drag {
   border-color: rgba(88, 214, 141, 0.85);
   background: rgba(88, 214, 141, 0.15);
+  box-shadow: 0 0 0 2px rgba(88, 214, 141, 0.35);
+  cursor: all-scroll;
+}
+
+.designer-item.active-drag:focus,
+.designer-item.active-drag:focus-visible {
+  border-color: rgba(88, 214, 141, 0.85);
   box-shadow: 0 0 0 2px rgba(88, 214, 141, 0.35);
 }
 
