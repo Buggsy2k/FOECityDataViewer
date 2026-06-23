@@ -204,6 +204,9 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
   const roadDropdownRef = useRef<HTMLDivElement>(null);
   const mapSizeDropdownRef = useRef<HTMLDivElement>(null);
   const importLayoutInputRef = useRef<HTMLInputElement>(null);
+  const stagingNoticeTimeoutRef = useRef<number | null>(null);
+  const [stagingNotice, setStagingNotice] = useState<string | null>(null);
+  const [noticeType, setNoticeType] = useState<'positive' | 'negative' | null>(null);
 
   const placeholderTemplateById = useMemo(() => {
     const map = new Map<number, PlaceholderTemplate>();
@@ -233,6 +236,45 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
       setPlaceholderName(placeholderNamePreview);
     }
   }, [placeholderNameEdited, placeholderNamePreview]);
+
+  const showStagingNotice = useCallback((message: string, type: 'positive' | 'negative' = 'positive') => {
+    setStagingNotice(message);
+    setNoticeType(type);
+    if (stagingNoticeTimeoutRef.current !== null) {
+      window.clearTimeout(stagingNoticeTimeoutRef.current);
+    }
+    stagingNoticeTimeoutRef.current = window.setTimeout(() => {
+      setStagingNotice(null);
+      setNoticeType(null);
+      stagingNoticeTimeoutRef.current = null;
+    }, 3200);
+  }, []);
+
+  useEffect(() => {
+    const handleMouseDown = () => {
+      if (stagingNotice) {
+        setStagingNotice(null);
+        setNoticeType(null);
+        if (stagingNoticeTimeoutRef.current !== null) {
+          window.clearTimeout(stagingNoticeTimeoutRef.current);
+          stagingNoticeTimeoutRef.current = null;
+        }
+      }
+    };
+
+    if (stagingNotice) {
+      document.addEventListener('mousedown', handleMouseDown);
+      return () => document.removeEventListener('mousedown', handleMouseDown);
+    }
+  }, [stagingNotice]);
+
+  useEffect(() => {
+    return () => {
+      if (stagingNoticeTimeoutRef.current !== null) {
+        window.clearTimeout(stagingNoticeTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const getRoadNeed = useCallback((b: PlacedBuilding): RoadNeed => {
     if (INHERENT_NO_ROAD_TYPES.has(b.entry.type)) return 'none';
@@ -1996,7 +2038,8 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
 
     const nextLayout = captureCurrentLayout(layoutName);
     setSavedLayouts(prev => prev.map(l => (l.name === layoutName ? nextLayout : l)));
-  }, [savedLayouts, captureCurrentLayout]);
+    showStagingNotice(`Version "${layoutName}" updated successfully`);
+  }, [savedLayouts, captureCurrentLayout, showStagingNotice]);
 
   const loadLayout = useCallback((layoutName: string) => {
     const layout = savedLayouts.find(l => l.name === layoutName);
@@ -2528,6 +2571,12 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
                   key={stack.key}
                   className={`designer-item parked${(dragState?.id != null && stack.ids.includes(dragState.id)) || (stack.status === 'available' && dragState?.originParked && dragState?.cityentityId === stack.cityentityId) ? ' active-drag' : ''}${stack.status === 'deleted' ? ' marked-for-deletion no-available' : ''}`}
                   onClick={(e) => {
+                    const target = e.target as HTMLElement;
+                    if (target.closest('.designer-item-icon-btn')) {
+                      setSelectedIds(new Set());
+                      setDragState(null);
+                      return;
+                    }
                     if (dragState?.originParked && dragState.id != null && stack.ids.includes(dragState.id)) {
                       e.preventDefault();
                       e.stopPropagation();
@@ -2535,7 +2584,12 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
                       setIsPanning(false);
                       return;
                     }
-                    if (stack.dragId == null) return;
+                    if (stack.dragId == null) {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      showStagingNotice('This item is marked for deletion and cannot be selected or moved. Restore it first to use it.', 'negative');
+                      return;
+                    }
                     startDrag(e, stack.dragId);
                   }}
                   title={stack.status === 'available'
@@ -2566,12 +2620,16 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
                         onClick={(e) => {
                           e.preventDefault();
                           e.stopPropagation();
+                          setSelectedIds(new Set());
+                          setDragState(null);
                           adjustMarkedForDeletionCount(stack, 'mark');
                         }}
                         onKeyDown={(e) => {
                           if (e.key !== 'Enter' && e.key !== ' ') return;
                           e.preventDefault();
                           e.stopPropagation();
+                          setSelectedIds(new Set());
+                          setDragState(null);
                           adjustMarkedForDeletionCount(stack, 'mark');
                         }}
                       >
@@ -2588,12 +2646,16 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
                         onClick={(e) => {
                           e.preventDefault();
                           e.stopPropagation();
+                          setSelectedIds(new Set());
+                          setDragState(null);
                           adjustMarkedForDeletionCount(stack, 'unmark');
                         }}
                         onKeyDown={(e) => {
                           if (e.key !== 'Enter' && e.key !== ' ') return;
                           e.preventDefault();
                           e.stopPropagation();
+                          setSelectedIds(new Set());
+                          setDragState(null);
                           adjustMarkedForDeletionCount(stack, 'unmark');
                         }}
                       >
@@ -3017,6 +3079,12 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
       </div>
 
       <p className="grid-hint">Scroll to zoom · drag background to pan · Ctrl+drag to pan during placement · Shift+click add selection · Shift+drag marquee select · drag to move · Alt+Click to stage · Ctrl+Z to undo · click parked item to pick up, click map to place</p>
+
+      {stagingNotice && (
+        <div className={`designer-staging-notice ${noticeType}`} role="status" aria-live="polite">
+          {stagingNotice}
+        </div>
+      )}
 
       {dragState?.originParked && (() => {
         const b = buildingById.get(dragState.id);
