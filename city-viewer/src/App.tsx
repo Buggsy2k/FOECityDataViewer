@@ -142,9 +142,6 @@ function AppContent() {
           onDragLeave={() => setDragOver(false)}
         >
           <div className="header-actions">
-            <button className="reset-btn" disabled={isLoading} onClick={() => fileInputRef.current?.click()}>
-              📂 Load New File
-            </button>
             <button
               ref={pasteButtonRef}
               className={`reset-btn${pasteArmed ? ' paste-armed' : ''}`}
@@ -160,6 +157,9 @@ function AppContent() {
               onPaste={handleQuickPaste}
             >
               📝 {pasteArmed ? 'Paste Now' : 'Manual Paste'}
+            </button>
+            <button className="reset-btn" disabled={isLoading} onClick={() => fileInputRef.current?.click()}>
+              📂 Load New File
             </button>
           </div>
           <input

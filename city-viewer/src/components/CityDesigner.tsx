@@ -199,6 +199,8 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
   const [sizeDropdownOpen, setSizeDropdownOpen] = useState(false);
   const [roadDropdownOpen, setRoadDropdownOpen] = useState(false);
   const [mapSizeDropdownOpen, setMapSizeDropdownOpen] = useState(false);
+  const [isStagingCollapsed, setIsStagingCollapsed] = useState(false);
+  const [showHelpModal, setShowHelpModal] = useState(false);
   const typeDropdownRef = useRef<HTMLDivElement>(null);
   const sizeDropdownRef = useRef<HTMLDivElement>(null);
   const roadDropdownRef = useRef<HTMLDivElement>(null);
@@ -580,17 +582,6 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
 
   const mapSearchQuery = mapSearchText.trim().toLowerCase();
   const mapSearchActive = mapSearchQuery.length > 0;
-
-  const mapSearchMatchCount = useMemo(() => {
-    let count = 0;
-    for (const b of mapBuildings) {
-      const matchesMapSize = !mapSizeFilterActive || !mapHiddenSizes.has(b.sizeKey);
-      const name = getDesignerBuildingName(b).toLowerCase();
-      const matchesMapSearch = !mapSearchActive || name.includes(mapSearchQuery);
-      if (matchesMapSize && matchesMapSearch) count++;
-    }
-    return count;
-  }, [mapBuildings, mapSizeFilterActive, mapHiddenSizes, mapSearchActive, mapSearchQuery, getDesignerBuildingName]);
 
   const computeRoadConnectivity = useCallback((placed: DesignerBuilding[]) => {
     const streetByCellAny = new Map<string, number>();
@@ -1958,8 +1949,6 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
     setParkedIds(new Set(allBuildings.map(b => b.entry.id)));
   }, [allBuildings, recordHistory]);
 
-  const placedCount = allBuildings.length - parkedIds.size;
-
   const runLayoutValidation = useCallback(() => {
     const connectivity = computeRoadConnectivity(mapBuildings);
     const invalid = new Set<number>();
@@ -2086,6 +2075,98 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
     a.remove();
     URL.revokeObjectURL(a.href);
   }, [savedLayouts]);
+
+  const exportMapImageJpg = useCallback(async () => {
+    if (!svgRef.current || !data?.UnlockedAreas) return;
+
+    const fullBounds = getGridBounds(data.UnlockedAreas, mapBuildings);
+    const padCells = 2;
+    const exportView = {
+      x: (fullBounds.minX - padCells) * CELL_SIZE,
+      y: (fullBounds.minY - padCells) * CELL_SIZE,
+      w: (fullBounds.width + padCells * 2) * CELL_SIZE,
+      h: (fullBounds.height + padCells * 2) * CELL_SIZE,
+    };
+
+    const exportWidth = Math.max(1, Math.round(exportView.w));
+    const exportHeight = Math.max(1, Math.round(exportView.h));
+
+    let renderScale = 4;
+    const maxSide = Math.max(exportWidth, exportHeight);
+    if (maxSide * renderScale > 10000) {
+      renderScale = 10000 / maxSide;
+    }
+    renderScale = Math.max(1.5, renderScale);
+
+    const makeSerializedSvg = (stripForeignObject: boolean): string => {
+      const svgClone = svgRef.current!.cloneNode(true) as SVGSVGElement;
+      svgClone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+      svgClone.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
+      svgClone.setAttribute('viewBox', `${exportView.x} ${exportView.y} ${exportView.w} ${exportView.h}`);
+      svgClone.setAttribute('width', `${exportWidth}`);
+      svgClone.setAttribute('height', `${exportHeight}`);
+
+      if (stripForeignObject) {
+        svgClone.querySelectorAll('foreignObject').forEach(node => node.remove());
+      }
+
+      return new XMLSerializer().serializeToString(svgClone);
+    };
+
+    const renderSerializedSvgToJpg = async (serializedSvg: string): Promise<Blob> => {
+      const svgDataUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(serializedSvg)}`;
+      const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = () => reject(new Error('Failed to load exported SVG image.'));
+        img.src = svgDataUrl;
+      });
+
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(exportWidth * renderScale));
+      canvas.height = Math.max(1, Math.round(exportHeight * renderScale));
+
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        throw new Error('Unable to create image export context.');
+      }
+
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+      const blob = await new Promise<Blob | null>((resolve) => {
+        canvas.toBlob(resolve, 'image/jpeg', 0.92);
+      });
+
+      if (!blob) {
+        throw new Error('Failed to generate JPG data.');
+      }
+
+      return blob;
+    };
+
+    try {
+      let jpgBlob: Blob;
+      try {
+        jpgBlob = await renderSerializedSvgToJpg(makeSerializedSvg(false));
+      } catch {
+        // Some browsers cannot rasterize SVG foreignObject content reliably.
+        jpgBlob = await renderSerializedSvgToJpg(makeSerializedSvg(true));
+      }
+
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(jpgBlob);
+      a.download = `city-designer-map-${timestamp}.jpg`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(a.href);
+    } catch {
+      window.alert('Failed to export the current map image as JPG.');
+    }
+  }, [data, mapBuildings]);
 
   const importLayoutsFromFile = useCallback((file: File) => {
     const reader = new FileReader();
@@ -2279,15 +2360,6 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
     return ids;
   }, [allBuildings, parkedIds, positions]);
 
-  const changedTotalCount = useMemo(() => {
-    let count = 0;
-    for (const b of allBuildings) {
-      const current = positions.get(b.entry.id) ?? { x: b.x, y: b.y };
-      if (parkedIds.has(b.entry.id) || current.x !== b.x || current.y !== b.y) count++;
-    }
-    return count;
-  }, [allBuildings, parkedIds, positions]);
-
   const mapCursor = isPanning
     ? 'grabbing'
     : (dragState ? 'all-scroll' : 'default');
@@ -2304,7 +2376,17 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
   return (
     <div className="city-designer-container">
       <div className="grid-header">
-        <h2>City Designer</h2>
+        <div className="designer-header-title">
+          <h2>City Designer</h2>
+          <button
+            className="designer-title-help-btn"
+            title="Show help for City Designer"
+            onClick={() => setShowHelpModal(true)}
+            aria-label="Show help"
+          >
+            ?
+          </button>
+        </div>
         <div className="grid-toolbar designer-actions">
           <button
             className="grid-dropdown-btn designer-icon-btn"
@@ -2360,6 +2442,16 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
           >
             ⤢
           </button>
+          <button
+            className="grid-dropdown-btn designer-icon-btn"
+            title="Export full map as high-resolution JPG"
+            onClick={() => {
+              void exportMapImageJpg();
+            }}
+            aria-label="Export full map as JPG"
+          >
+            🖼
+          </button>
           <div className="grid-search designer-map-search">
             <input
               type="text"
@@ -2410,26 +2502,47 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
             )}
           </div>
           <div className="designer-summary-group">
-            <span className="grid-search-count">{mapSearchMatchCount} on map</span>
-            <span className="designer-changes-summary">
-              {changedTotalCount} changed ({parkedIds.size} parked)
-            </span>
+            <div className="designer-summary-item">
+              <span className="designer-summary-label">Total:</span>
+              <span className="designer-summary-value">{allBuildings.length}</span>
+            </div>
+            <div className="designer-summary-item">
+              <span className="designer-summary-label">On Map:</span>
+              <span className="designer-summary-value">{allBuildings.length - parkedIds.size}</span>
+            </div>
+            <div className="designer-summary-item">
+              <span className="designer-summary-label">Parked:</span>
+              <span className="designer-summary-value">{parkedIds.size - markedForDeletionIds.size}</span>
+            </div>
+            <div className="designer-summary-item marked-for-deletion">
+              <span className="designer-summary-label">Marked:</span>
+              <span className="designer-summary-value">{markedForDeletionIds.size}</span>
+            </div>
             {validationRan && (
-              <span className={`designer-validation-status ${validationInvalidIds.size > 0 ? 'invalid' : 'valid'}`}>
-                {validationInvalidIds.size > 0
-                  ? `${validationInvalidIds.size} invalid`
-                  : 'All valid'}
-              </span>
+              <div className={`designer-summary-item validation-status ${validationInvalidIds.size > 0 ? 'invalid' : 'valid'}`}>
+                <span className="designer-summary-label">{validationInvalidIds.size > 0 ? 'Invalid:' : 'Valid:'}</span>
+                <span className="designer-summary-value">{validationInvalidIds.size > 0 ? validationInvalidIds.size : '✓'}</span>
+              </div>
             )}
           </div>
         </div>
       </div>
 
-      <div className="city-designer-body">
-        <aside className={`designer-panel ${dragState?.overPanel ? 'drop-ready' : ''}`} ref={panelRef}>
+      <div className={`city-designer-body ${isStagingCollapsed ? 'staging-collapsed' : ''}`}>
+        <aside className={`designer-panel ${dragState?.overPanel ? 'drop-ready' : ''} ${isStagingCollapsed ? 'collapsed' : ''}`} ref={panelRef}>
           <div className="designer-panel-header">
-            <h3>Staging Area</h3>
+            {!isStagingCollapsed && <h3>Staging Area</h3>}
             <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                className="designer-sort-btn"
+                onClick={() => setIsStagingCollapsed(prev => !prev)}
+                title={isStagingCollapsed ? 'Expand Staging Area' : 'Collapse Staging Area'}
+                aria-label={isStagingCollapsed ? 'Expand Staging Area' : 'Collapse Staging Area'}
+              >
+                {isStagingCollapsed ? '»' : '«'}
+              </button>
+              {!isStagingCollapsed && (
+                <>
               <button
                 className={`designer-sort-btn ${parkedSortMode !== 'name' ? 'active' : ''}`}
                 onClick={() => setParkedSortMode(prev => prev === 'name' ? 'era' : prev === 'era' ? 'size' : 'name')}
@@ -2450,9 +2563,11 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
               >
                 Order: {parkedSortDirection === 'asc' ? 'Asc' : 'Desc'}
               </button>
+                </>
+              )}
             </div>
           </div>
-          <div className="designer-panel-content">
+          {!isStagingCollapsed && <div className="designer-panel-content">
           <div className="designer-staging-filters">
             <div className="grid-dropdown" ref={typeDropdownRef}>
               <button className="grid-dropdown-btn" onClick={() => setTypeDropdownOpen(v => !v)}>
@@ -2558,11 +2673,6 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
             >
               Clear Filters
             </button>
-          </div>
-          <div className="designer-metrics">
-            <div><strong>{parkedIds.size}</strong> parked</div>
-            <div><strong>{placedCount}</strong> on map</div>
-            <div><strong>{allBuildings.length}</strong> total</div>
           </div>
           <div className="designer-list">
             {parkedStacks.map(stack => {
@@ -2818,7 +2928,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
               <div className="designer-empty">No custom placeholders yet.</div>
             )}
           </div>
-          </div>
+          </div>}
         </aside>
 
         <div
@@ -3111,6 +3221,85 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
           </div>
         );
       })()}
+
+      {showHelpModal && (
+        <div className="designer-help-modal-overlay" onClick={() => setShowHelpModal(false)}>
+          <div className="designer-help-modal" onClick={e => e.stopPropagation()}>
+            <div className="designer-help-header">
+              <h2>City Designer — How to Use</h2>
+              <button
+                className="designer-help-close"
+                onClick={() => setShowHelpModal(false)}
+                title="Close help"
+                aria-label="Close help"
+              >
+                ×
+              </button>
+            </div>
+            <div className="designer-help-content">
+              <h3>Basic Navigation</h3>
+              <ul>
+                <li><strong>Pan:</strong> Right-click and drag, or Ctrl+click and drag</li>
+                <li><strong>Zoom:</strong> Scroll wheel (or pinch on trackpad)</li>
+                <li><strong>Click a building:</strong> Select it (or deselect if already selected)</li>
+                <li><strong>Drag from selection:</strong> Place selected building(s) on the map</li>
+                <li><strong>Drag to staging area</strong> (right panel): Remove building(s) temporarily ("park" them)</li>
+              </ul>
+
+              <h3>Managing Buildings</h3>
+              <ul>
+                <li><strong>Parked Section</strong> (right panel): Drag buildings here to get them out of the way; drag them back to the map to place them again</li>
+                <li><strong>Delete:</strong> Click the <strong>−</strong> button next to a parked building to mark it for deletion; click <strong>+</strong> to restore it</li>
+                <li><strong>Filter:</strong> Use dropdown menus (Type, Size, Road) to show only buildings matching your criteria</li>
+                <li><strong>Search:</strong> Type to find buildings by name in the staging area or map</li>
+              </ul>
+
+              <h3>Multi-Selection (Batch Placement)</h3>
+              <ul>
+                <li><strong>Shift+click</strong> multiple buildings to select a group</li>
+                <li><strong>Drag any selected building</strong> to move the entire group together</li>
+                <li><strong>Ctrl+A:</strong> Select all buildings</li>
+                <li><strong>Escape:</strong> Deselect all</li>
+              </ul>
+
+              <h3>Working with Roads</h3>
+              <ul>
+                <li><strong>Road Classification</strong> appears in the staging area (No Road / 1x1 Road / 2x2 Road)</li>
+                <li><strong>Validation</strong> (Run Validation button) checks that roads are connected properly to buildings that need them</li>
+              </ul>
+
+              <h3>Saving &amp; Loading Layouts</h3>
+              <ol>
+                <li><strong>Save:</strong> Click the <strong>Save</strong> button in the "Saved Versions" panel to create a snapshot</li>
+                <li><strong>Load:</strong> Click <strong>Load</strong> to revert to any saved layout</li>
+                <li><strong>Update:</strong> Modify a layout and click <strong>Update</strong> to save changes</li>
+                <li><strong>Export:</strong> Download a layout as JSON to share or backup</li>
+                <li><strong>Import:</strong> Load a previously exported layout from file</li>
+              </ol>
+
+              <h3>Custom Placeholders</h3>
+              <p>Use placeholders to reserve space on your map for future buildings:</p>
+              <ol>
+                <li>Enter a name (e.g., "Future GB Plot")</li>
+                <li>Set dimensions (height × width in cells)</li>
+                <li>Select road requirement (None / 1x1 / 2x2)</li>
+                <li>Click <strong>Add Placeholder</strong></li>
+                <li>Click the <strong>+</strong> button next to your placeholder to stage copies</li>
+                <li>Drag them onto the map like any other building</li>
+              </ol>
+
+              <h3>Tips</h3>
+              <ul>
+                <li><strong>Undo/Redo:</strong> Changes are tracked; use browser back/forward or edit again to navigate history</li>
+                <li><strong>Validation:</strong> Run the validation check to catch buildings that need road connectivity</li>
+                <li><strong>Full Screen:</strong> Toggle the fullscreen button for more canvas space</li>
+                <li><strong>Changed Highlights:</strong> Enable this checkbox to visually highlight moved buildings</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+

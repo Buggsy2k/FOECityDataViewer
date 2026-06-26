@@ -8,6 +8,7 @@ export default function DataLoader() {
   const [dragging, setDragging] = useState(false);
   const [pasteArmed, setPasteArmed] = useState(false);
   const pasteButtonRef = useRef<HTMLButtonElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const parseAndLoad = useCallback((text: string) => {
     try {
@@ -80,6 +81,42 @@ export default function DataLoader() {
         <h1>FOE City Data Viewer</h1>
         <p className="subtitle">Forge of Empires City Analysis Tool</p>
 
+        <div className="loader-actions">
+          <button
+            ref={pasteButtonRef}
+            type="button"
+            autoFocus
+            className={`paste-button${pasteArmed ? ' paste-armed' : ''}`}
+            title={pasteArmed ? 'Press Ctrl+V (or your system paste shortcut) to load city data now' : undefined}
+            onClick={() => {
+              setError(null);
+              setPasteArmed(true);
+              pasteButtonRef.current?.focus();
+            }}
+            onBlur={() => setPasteArmed(false)}
+            onPaste={handleQuickPaste}
+            disabled={isLoading}
+          >
+            {pasteArmed ? 'Paste Now' : 'Manual Paste'}
+          </button>
+          <button
+            className="paste-button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isLoading}
+            title="Browse for a citydata.json file"
+          >
+            Browse Files
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".json"
+            onChange={handleInputChange}
+            disabled={isLoading}
+            hidden
+          />
+        </div>
+
         <div
           className={`drop-zone ${dragging ? 'dragging' : ''}${isLoading ? ' loading' : ''}`}
           onDrop={handleDrop}
@@ -90,35 +127,6 @@ export default function DataLoader() {
           <p>{isLoading ? 'Loading city JSON...' : <>Drag & drop your <strong>citydata.json</strong> here</>}</p>
           {!isLoading && <p className="or">or</p>}
           {isLoading && <div className="loader-inline-spinner" aria-hidden="true" />}
-          <div className="loader-actions">
-            <label className="file-button">
-              Browse Files
-              <input
-                type="file"
-                accept=".json"
-                onChange={handleInputChange}
-                disabled={isLoading}
-                hidden
-              />
-            </label>
-            <button
-              ref={pasteButtonRef}
-              type="button"
-              className={`paste-button${pasteArmed ? ' paste-armed' : ''}`}
-              title={pasteArmed ? 'Press Ctrl+V (or your system paste shortcut) to load city data now' : undefined}
-              onClick={() => {
-                setError(null);
-                setPasteArmed(true);
-                pasteButtonRef.current?.focus();
-              }}
-              onFocus={() => setPasteArmed(true)}
-              onBlur={() => setPasteArmed(false)}
-              onPaste={handleQuickPaste}
-              disabled={isLoading}
-            >
-              {pasteArmed ? 'Paste Now' : 'Manual Paste'}
-            </button>
-          </div>
         </div>
 
         {error && <div className="error-message">{error}</div>}
