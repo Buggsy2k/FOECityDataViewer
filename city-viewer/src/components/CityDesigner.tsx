@@ -203,7 +203,6 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
   const [isStagingCollapsed, setIsStagingCollapsed] = useState(false);
   const [showHelpModal, setShowHelpModal] = useState(false);
   const parkedMouseDownRef = useRef<{ buildingId: number; startX: number; startY: number; moved: boolean } | null>(null);
-  const suppressParkedClickRef = useRef(false);
   const typeDropdownRef = useRef<HTMLDivElement>(null);
   const sizeDropdownRef = useRef<HTMLDivElement>(null);
   const roadDropdownRef = useRef<HTMLDivElement>(null);
@@ -1624,7 +1623,6 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
       if (Math.hypot(dx, dy) < PARKED_DRAG_THRESHOLD_PX) return;
 
       pending.moved = true;
-      suppressParkedClickRef.current = true;
       startDragFromPointer(pending.buildingId, e.clientX, e.clientY, e.ctrlKey);
     };
 
@@ -2711,7 +2709,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
               return (
                 <button
                   key={stack.key}
-                  className={`designer-item parked${(dragState?.id != null && stack.ids.includes(dragState.id)) || (stack.status === 'available' && dragState?.originParked && dragState?.cityentityId === stack.cityentityId) ? ' active-drag' : ''}${stack.status === 'deleted' ? ' marked-for-deletion no-available' : ''}`}
+                  className={`designer-item parked${stack.status === 'deleted' ? ' marked-for-deletion no-available' : ''}`}
                   onMouseDown={(e) => {
                     if (e.button !== 0) return;
                     const target = e.target as HTMLElement;
@@ -2724,36 +2722,8 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
                       moved: false,
                     };
                   }}
-                  onClick={(e) => {
-                    if (suppressParkedClickRef.current) {
-                      suppressParkedClickRef.current = false;
-                      e.preventDefault();
-                      e.stopPropagation();
-                      return;
-                    }
-                    const target = e.target as HTMLElement;
-                    if (target.closest('.designer-item-icon-btn')) {
-                      setSelectedIds(new Set());
-                      setDragState(null);
-                      return;
-                    }
-                    if (dragState?.originParked && dragState.id != null && stack.ids.includes(dragState.id)) {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      setDragState(null);
-                      setIsPanning(false);
-                      return;
-                    }
-                    if (stack.dragId == null) {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      showStagingNotice('This item is marked for deletion and cannot be selected or moved. Restore it first to use it.', 'negative');
-                      return;
-                    }
-                    startDrag(e, stack.dragId);
-                  }}
                   title={stack.status === 'available'
-                    ? 'Click to pick up and place, click again to unselect, or click another item to switch'
+                    ? 'Click and drag to place this staged item on the map'
                     : 'This copy is marked for deletion and cannot be dragged'}
                 >
                   <span

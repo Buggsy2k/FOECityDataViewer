@@ -1910,19 +1910,6 @@ body {
   background: rgba(74, 144, 217, 0.12);
 }
 
-.designer-item.active-drag {
-  border-color: rgba(88, 214, 141, 0.85);
-  background: rgba(88, 214, 141, 0.15);
-  box-shadow: 0 0 0 2px rgba(88, 214, 141, 0.35);
-  cursor: all-scroll;
-}
-
-.designer-item.active-drag:focus,
-.designer-item.active-drag:focus-visible {
-  border-color: rgba(88, 214, 141, 0.85);
-  box-shadow: 0 0 0 2px rgba(88, 214, 141, 0.35);
-}
-
 .designer-item.marked-for-deletion {
   border-color: rgba(231, 76, 60, 0.8);
   border-width: 2px;
@@ -1933,12 +1920,6 @@ body {
 .designer-item.marked-for-deletion:focus-visible {
   border-color: rgba(231, 76, 60, 0.8);
   box-shadow: 0 0 0 1px rgba(231, 76, 60, 0.35);
-}
-
-.designer-item.marked-for-deletion.active-drag {
-  border-color: rgba(231, 76, 60, 0.8);
-  background: rgba(231, 76, 60, 0.08);
-  box-shadow: 0 0 8px rgba(231, 76, 60, 0.5);
 }
 
 .designer-item.no-available {
