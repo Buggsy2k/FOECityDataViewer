@@ -89,6 +89,7 @@ interface PlaceholderInstance {
 
 const LAYOUT_STORAGE_KEY = 'foe-city-designer-layouts-v1';
 const PLACEHOLDER_STORAGE_KEY = 'foe-city-designer-placeholders-v1';
+const PARKED_DRAG_THRESHOLD_PX = 5;
 
 const TYPE_LABELS: Record<string, string> = {
   main_building: 'Main Building',
@@ -201,6 +202,8 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
   const [mapSizeDropdownOpen, setMapSizeDropdownOpen] = useState(false);
   const [isStagingCollapsed, setIsStagingCollapsed] = useState(false);
   const [showHelpModal, setShowHelpModal] = useState(false);
+  const parkedMouseDownRef = useRef<{ buildingId: number; startX: number; startY: number; moved: boolean } | null>(null);
+  const suppressParkedClickRef = useRef(false);
   const typeDropdownRef = useRef<HTMLDivElement>(null);
   const sizeDropdownRef = useRef<HTMLDivElement>(null);
   const roadDropdownRef = useRef<HTMLDivElement>(null);
@@ -1511,24 +1514,21 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
     (wrapperRef as React.MutableRefObject<HTMLDivElement | null>).current = node;
   }, []);
 
-  const startDrag = useCallback((e: React.MouseEvent, buildingId: number) => {
-    if (e.ctrlKey) return;
-    
+  const startDragFromPointer = useCallback((buildingId: number, clientX: number, clientY: number, ctrlKey = false) => {
+    if (ctrlKey) return;
+
     const source = buildingById.get(buildingId);
     if (!source) return;
-    
+
     const isParked = parkedIds.has(buildingId);
     if (isParked && markedForDeletionIds.has(buildingId)) return;
-    
+
     // Allow switching between parked items, but not from placed to parked
     if (dragState && !(isParked && dragState.originParked)) return;
-    
-    e.preventDefault();
-    e.stopPropagation();
 
     const isStreet = source.entry.type === 'street';
     const origin = positions.get(buildingId) ?? { x: source.x, y: source.y };
-    const cursorGrid = screenToGridRef.current(e.clientX, e.clientY);
+    const cursorGrid = screenToGridRef.current(clientX, clientY);
     const gridAnchorOffset = (!isParked && cursorGrid)
       ? { dx: cursorGrid.x - origin.x, dy: cursorGrid.y - origin.y }
       : { dx: 0, dy: 0 };
@@ -1575,8 +1575,8 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
       gridAnchorOffset,
       groupIds: uniqueGroupIds,
       groupOffsets,
-      startPointer: { x: e.clientX, y: e.clientY },
-      pointer: { x: e.clientX, y: e.clientY },
+      startPointer: { x: clientX, y: clientY },
+      pointer: { x: clientX, y: clientY },
       overPanel: false,
       candidate,
       valid: !!candidate && (isParked
@@ -1590,7 +1590,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
           gridAnchorOffset,
           groupIds: uniqueGroupIds,
           groupOffsets,
-          pointer: { x: e.clientX, y: e.clientY },
+          pointer: { x: clientX, y: clientY },
           overPanel: false,
           candidate,
           valid: false,
@@ -1606,6 +1606,38 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
       lineCells: null,
       lineIds,
     });
+  }, [buildingById, positions, parkedIds, markedForDeletionIds, allBuildings, dragState, selectedIds, canPlaceGroup]);
+
+  const startDrag = useCallback((e: React.MouseEvent, buildingId: number) => {
+    e.preventDefault();
+    e.stopPropagation();
+    startDragFromPointer(buildingId, e.clientX, e.clientY, e.ctrlKey);
+  }, [startDragFromPointer]);
+
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      const pending = parkedMouseDownRef.current;
+      if (!pending || pending.moved) return;
+
+      const dx = e.clientX - pending.startX;
+      const dy = e.clientY - pending.startY;
+      if (Math.hypot(dx, dy) < PARKED_DRAG_THRESHOLD_PX) return;
+
+      pending.moved = true;
+      suppressParkedClickRef.current = true;
+      startDragFromPointer(pending.buildingId, e.clientX, e.clientY, e.ctrlKey);
+    };
+
+    const onMouseUp = () => {
+      parkedMouseDownRef.current = null;
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
   }, [buildingById, positions, parkedIds, markedForDeletionIds, allBuildings, dragState, selectedIds, canPlaceGroup]);
 
   const finishSelectionRegion = useCallback((region: SelectionRegion) => {
@@ -2680,7 +2712,25 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
                 <button
                   key={stack.key}
                   className={`designer-item parked${(dragState?.id != null && stack.ids.includes(dragState.id)) || (stack.status === 'available' && dragState?.originParked && dragState?.cityentityId === stack.cityentityId) ? ' active-drag' : ''}${stack.status === 'deleted' ? ' marked-for-deletion no-available' : ''}`}
+                  onMouseDown={(e) => {
+                    if (e.button !== 0) return;
+                    const target = e.target as HTMLElement;
+                    if (target.closest('.designer-item-icon-btn')) return;
+                    if (stack.dragId == null) return;
+                    parkedMouseDownRef.current = {
+                      buildingId: stack.dragId,
+                      startX: e.clientX,
+                      startY: e.clientY,
+                      moved: false,
+                    };
+                  }}
                   onClick={(e) => {
+                    if (suppressParkedClickRef.current) {
+                      suppressParkedClickRef.current = false;
+                      e.preventDefault();
+                      e.stopPropagation();
+                      return;
+                    }
                     const target = e.target as HTMLElement;
                     if (target.closest('.designer-item-icon-btn')) {
                       setSelectedIds(new Set());
