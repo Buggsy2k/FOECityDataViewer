@@ -139,6 +139,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
   const wrapperRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLElement>(null);
   const historyRef = useRef<LayoutSnapshot[]>([]);
+  const redoHistoryRef = useRef<LayoutSnapshot[]>([]);
   const positionsRef = useRef<Map<number, { x: number; y: number }>>(new Map());
   const parkedIdsRef = useRef<Set<number>>(new Set());
   const markedForDeletionIdsRef = useRef<Set<number>>(new Set());
@@ -435,16 +436,22 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
     setParkedIds(new Set(snapshot.parkedIds));
   }, []);
 
-  const recordHistory = useCallback(() => {
-    historyRef.current.push({
+  const captureCurrentLayoutSnapshot = useCallback((): LayoutSnapshot => {
+    return {
       positions: new Map(positionsRef.current),
       parkedIds: new Set(parkedIdsRef.current),
-    });
+    };
+  }, []);
+
+  const recordHistory = useCallback(() => {
+    historyRef.current.push(captureCurrentLayoutSnapshot());
+    // Any fresh edit invalidates the redo branch.
+    redoHistoryRef.current = [];
 
     if (historyRef.current.length > 100) {
       historyRef.current.shift();
     }
-  }, []);
+  }, [captureCurrentLayoutSnapshot]);
 
   useEffect(() => {
     const allIds = new Set(allBuildings.map(b => b.entry.id));
@@ -1401,13 +1408,40 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
     };
 
     const onKeyDown = (e: KeyboardEvent) => {
-      if (!e.ctrlKey || e.shiftKey || e.key.toLowerCase() !== 'z') return;
+      const hasPrimaryMod = e.ctrlKey || e.metaKey;
+      if (!hasPrimaryMod) return;
       if (isEditableTarget(e.target)) return;
+
+      const key = e.key.toLowerCase();
+      const code = e.code;
+      const isUndoShortcut = !e.shiftKey && (key === 'z' || code === 'KeyZ');
+      const isRedoShortcut =
+        (e.shiftKey && (key === 'z' || code === 'KeyZ')) ||
+        (key === 'y' || code === 'KeyY');
+      if (!isUndoShortcut && !isRedoShortcut) return;
+
+      e.preventDefault();
+
+      if (isRedoShortcut) {
+        const next = redoHistoryRef.current.pop();
+        if (!next) return;
+        historyRef.current.push(captureCurrentLayoutSnapshot());
+        if (historyRef.current.length > 100) historyRef.current.shift();
+
+        // Cancel active drag before replaying history state.
+        if (dragStateRef.current) {
+          setDragState(null);
+          setIsPanning(false);
+        }
+        swapChainSnapshotRef.current = null;
+        applyLayoutSnapshot(next);
+        return;
+      }
 
       const previous = historyRef.current.pop();
       if (!previous) return;
-
-      e.preventDefault();
+      redoHistoryRef.current.push(captureCurrentLayoutSnapshot());
+      if (redoHistoryRef.current.length > 100) redoHistoryRef.current.shift();
 
       // Cancel any active drag before applying undo — a building that is currently
       // "in hand" is not on the map, so restoring positions without first dropping it
@@ -1424,7 +1458,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [applyLayoutSnapshot]);
+  }, [applyLayoutSnapshot, captureCurrentLayoutSnapshot]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -3208,7 +3242,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
         </div>
       </div>
 
-      <p className="grid-hint">Scroll to zoom · drag background to pan · Ctrl+drag to pan during placement · Shift+click add selection · Shift+drag marquee select · drag to move · Alt+Click to stage · Ctrl+Z to undo · click and drag staged items from the Staging Area to place them</p>
+      <p className="grid-hint">Scroll to zoom · drag background to pan · Ctrl+drag to pan during placement · Shift+click add selection · Shift+drag marquee select · drag to move · Alt+Click to stage · Ctrl+Z undo · Ctrl+Shift+Z or Ctrl+Y redo · click and drag staged items from the Staging Area to place them</p>
 
       {stagingNotice && (
         <div className={`designer-staging-notice ${noticeType}`} role="status" aria-live="polite">
@@ -3311,7 +3345,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
 
               <h3>Tips</h3>
               <ul>
-                <li><strong>Undo/Redo:</strong> Changes are tracked; use browser back/forward or edit again to navigate history</li>
+                <li><strong>Undo/Redo:</strong> Use <strong>Ctrl+Z</strong> to undo and <strong>Ctrl+Shift+Z</strong> (or <strong>Ctrl+Y</strong>) to redo</li>
                 <li><strong>Validation:</strong> Run the validation check to catch buildings that need road connectivity</li>
                 <li><strong>Full Screen:</strong> Toggle the fullscreen button for more canvas space</li>
                 <li><strong>Changed Highlights:</strong> Enable this checkbox to visually highlight moved buildings</li>
