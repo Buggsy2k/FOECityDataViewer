@@ -3208,7 +3208,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
         </div>
       </div>
 
-      <p className="grid-hint">Scroll to zoom · drag background to pan · Ctrl+drag to pan during placement · Shift+click add selection · Shift+drag marquee select · drag to move · Alt+Click to stage · Ctrl+Z to undo · click parked item to pick up, click map to place</p>
+      <p className="grid-hint">Scroll to zoom · drag background to pan · Ctrl+drag to pan during placement · Shift+click add selection · Shift+drag marquee select · drag to move · Alt+Click to stage · Ctrl+Z to undo · click and drag staged items from the Staging Area to place them</p>
 
       {stagingNotice && (
         <div className={`designer-staging-notice ${noticeType}`} role="status" aria-live="polite">
@@ -3268,7 +3268,8 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
 
               <h3>Managing Buildings</h3>
               <ul>
-                <li><strong>Parked Section</strong> (right panel): Drag buildings here to get them out of the way; drag them back to the map to place them again</li>
+                <li><strong>Parked Section</strong> (right panel): Drag buildings here to get them out of the way; click and drag them back to the map to place them again</li>
+                <li><strong>Staged Items:</strong> Staging is drag-only. Clicking a staged row does not pick up or select it.</li>
                 <li><strong>Delete:</strong> Click the <strong>−</strong> button next to a parked building to mark it for deletion; click <strong>+</strong> to restore it</li>
                 <li><strong>Filter:</strong> Use dropdown menus (Type, Size, Road) to show only buildings matching your criteria</li>
                 <li><strong>Search:</strong> Type to find buildings by name in the staging area or map</li>
