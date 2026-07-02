@@ -3,7 +3,7 @@ import { useCityData } from '../context/CityDataContext';
 import type { CityData } from '../types/citydata';
 
 export default function DataLoader() {
-  const { isLoading, setIsLoading, setData } = useCityData();
+  const { isLoading, setIsLoading, setData, hasRestorableState, restorePersistedState, clearPersistedState } = useCityData();
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [pasteArmed, setPasteArmed] = useState(false);
@@ -75,6 +75,27 @@ export default function DataLoader() {
     }, 0);
   }, [isLoading, parseAndLoad, setIsLoading]);
 
+  const handleRestore = useCallback(() => {
+    if (isLoading) return;
+
+    setIsLoading(true);
+    // Let the loading UI paint before restoring potentially large state.
+    window.setTimeout(() => {
+      void (async () => {
+        try {
+          const restored = await restorePersistedState();
+          if (!restored) {
+            setError('Saved session could not be restored. Please load city data manually.');
+            return;
+          }
+          setError(null);
+        } finally {
+          setIsLoading(false);
+        }
+      })();
+    }, 0);
+  }, [isLoading, restorePersistedState, setIsLoading]);
+
   return (
     <div className="data-loader">
       <div className="loader-content">
@@ -82,10 +103,22 @@ export default function DataLoader() {
         <p className="subtitle">Forge of Empires City Analysis Tool</p>
 
         <div className="loader-actions">
+          {hasRestorableState && (
+            <button
+              type="button"
+              autoFocus
+              className="paste-button restore-button"
+              onClick={handleRestore}
+              disabled={isLoading}
+              title="Restore your last successfully loaded city state"
+            >
+              Restore Previous Session
+            </button>
+          )}
           <button
             ref={pasteButtonRef}
             type="button"
-            autoFocus
+            autoFocus={!hasRestorableState}
             className={`paste-button${pasteArmed ? ' paste-armed' : ''}`}
             title={pasteArmed ? 'Press Ctrl+V (or your system paste shortcut) to load city data now' : undefined}
             onClick={() => {
@@ -116,6 +149,22 @@ export default function DataLoader() {
             hidden
           />
         </div>
+
+        {hasRestorableState && (
+          <div className="loader-secondary-actions">
+            <button
+              type="button"
+              className="clear-session-btn"
+              onClick={() => {
+                void clearPersistedState();
+              }}
+              disabled={isLoading}
+              title="Remove the locally saved session"
+            >
+              Clear saved session
+            </button>
+          </div>
+        )}
 
         <div
           className={`drop-zone ${dragging ? 'dragging' : ''}${isLoading ? ' loading' : ''}`}

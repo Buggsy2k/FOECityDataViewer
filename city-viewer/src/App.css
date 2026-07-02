@@ -360,6 +360,33 @@ body {
   margin-bottom: 2rem;
 }
 
+.loader-secondary-actions {
+  display: flex;
+  justify-content: center;
+  margin-top: -1.25rem;
+  margin-bottom: 1.25rem;
+}
+
+.clear-session-btn {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  text-decoration: underline;
+  text-decoration-color: rgba(160, 160, 176, 0.55);
+  cursor: pointer;
+  padding: 0;
+}
+
+.clear-session-btn:hover {
+  color: var(--text-secondary);
+}
+
+.clear-session-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .paste-button {
   padding: 0.6rem 1.5rem;
   background: transparent;
@@ -379,6 +406,18 @@ body {
 .paste-button:disabled {
   opacity: 0.55;
   cursor: not-allowed;
+}
+
+.restore-button {
+  background: var(--accent);
+  color: #fff;
+  border-color: transparent;
+}
+
+.restore-button:hover {
+  background: var(--accent-hover);
+  border-color: transparent;
+  color: #fff;
 }
 
 .paste-button.paste-armed,

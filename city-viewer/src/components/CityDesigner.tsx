@@ -2,6 +2,7 @@
 import { useCityData } from '../context/CityDataContext';
 import { getGridBounds, getPlacedBuildings, getBuildingColor, type PlacedBuilding } from '../utils/gridUtils';
 import { ERA_RANK, extractEra, resolveBuildingName } from '../utils/dataProcessing';
+import type { CityData } from '../types/citydata';
 
 const CELL_SIZE = 12;
 const MIN_VIEW = 5 * CELL_SIZE;   // max zoom in  (~5 cells visible)
@@ -87,8 +88,22 @@ interface PlaceholderInstance {
   templateId: number;
 }
 
+interface DesignerSessionState {
+  version: 1;
+  dataSignature: string;
+  savedAt: number;
+  positions: Array<{ id: number; x: number; y: number }>;
+  parkedIds: number[];
+  markedForDeletionIds: number[];
+  placeholderInstances: PlaceholderInstance[];
+}
+
 const LAYOUT_STORAGE_KEY = 'foe-city-designer-layouts-v1';
 const PLACEHOLDER_STORAGE_KEY = 'foe-city-designer-placeholders-v1';
+const DESIGNER_SESSION_STORAGE_KEY = 'foe-city-designer-session-state.v1';
+const DESIGNER_SESSION_DB_NAME = 'foe-city-designer';
+const DESIGNER_SESSION_STORE_NAME = 'session';
+const DESIGNER_SESSION_RECORD_KEY = 'latest';
 const PARKED_DRAG_THRESHOLD_PX = 5;
 
 const TYPE_LABELS: Record<string, string> = {
@@ -131,6 +146,103 @@ function sizeArea(sizeKey: string): number {
 function getPlaceholderDefaultName(width: number, length: number, roadNeed: RoadNeed): string {
   const roadLevel = roadNeed === 'road2' ? 2 : roadNeed === 'road1' ? 1 : 0;
   return `${length}x${width} r-${roadLevel}`;
+}
+
+function getDesignerDataSignature(data: CityData): string {
+  const ids = Object.keys(data.CityMapData)
+    .map(Number)
+    .filter(Number.isFinite)
+    .sort((a, b) => a - b);
+  let checksum = 0;
+  for (const id of ids) {
+    checksum = (checksum + ((id % 1000000007) * 31) % 1000000007) % 1000000007;
+  }
+
+  const first = ids.slice(0, 5).join(',');
+  const last = ids.slice(-5).join(',');
+  return [
+    ids.length,
+    data.UnlockedAreas.length,
+    Object.keys(data.CityEntities).length,
+    checksum,
+    first,
+    last,
+  ].join('|');
+}
+
+function openDesignerSessionDb(): Promise<IDBDatabase> {
+  if (typeof window === 'undefined' || !window.indexedDB) {
+    return Promise.reject(new Error('IndexedDB is not available'));
+  }
+
+  return new Promise((resolve, reject) => {
+    const request = window.indexedDB.open(DESIGNER_SESSION_DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(DESIGNER_SESSION_STORE_NAME)) {
+        db.createObjectStore(DESIGNER_SESSION_STORE_NAME);
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error ?? new Error('Failed to open designer session DB'));
+  });
+}
+
+async function readDesignerSessionFromIndexedDb(): Promise<DesignerSessionState | null> {
+  try {
+    const db = await openDesignerSessionDb();
+    const result = await new Promise<unknown>((resolve, reject) => {
+      const tx = db.transaction(DESIGNER_SESSION_STORE_NAME, 'readonly');
+      const store = tx.objectStore(DESIGNER_SESSION_STORE_NAME);
+      const request = store.get(DESIGNER_SESSION_RECORD_KEY);
+
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error ?? new Error('Failed to read designer session state'));
+      tx.oncomplete = () => db.close();
+      tx.onabort = () => {
+        db.close();
+        reject(tx.error ?? new Error('Designer session read transaction failed'));
+      };
+    });
+
+    if (!result || typeof result !== 'object') return null;
+    const parsed = result as Partial<DesignerSessionState>;
+    if (parsed.version !== 1 || typeof parsed.dataSignature !== 'string') return null;
+
+    return {
+      version: 1,
+      dataSignature: parsed.dataSignature,
+      savedAt: typeof parsed.savedAt === 'number' ? parsed.savedAt : Date.now(),
+      positions: Array.isArray(parsed.positions) ? parsed.positions : [],
+      parkedIds: Array.isArray(parsed.parkedIds) ? parsed.parkedIds : [],
+      markedForDeletionIds: Array.isArray(parsed.markedForDeletionIds) ? parsed.markedForDeletionIds : [],
+      placeholderInstances: Array.isArray(parsed.placeholderInstances) ? parsed.placeholderInstances : [],
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function writeDesignerSessionToIndexedDb(payload: DesignerSessionState): Promise<void> {
+  const db = await openDesignerSessionDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(DESIGNER_SESSION_STORE_NAME, 'readwrite');
+    const store = tx.objectStore(DESIGNER_SESSION_STORE_NAME);
+    const request = store.put(payload, DESIGNER_SESSION_RECORD_KEY);
+
+    request.onsuccess = () => {
+      // wait for transaction completion
+    };
+    request.onerror = () => reject(request.error ?? new Error('Failed to write designer session state'));
+    tx.oncomplete = () => {
+      db.close();
+      resolve();
+    };
+    tx.onabort = () => {
+      db.close();
+      reject(tx.error ?? new Error('Designer session write transaction failed'));
+    };
+  });
 }
 
 export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isFullscreen: boolean; onFullscreenChange: (fullscreen: boolean) => void }) {
@@ -196,6 +308,8 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
   const [placeholderRoadNeed, setPlaceholderRoadNeed] = useState<RoadNeed>('none');
   const [placeholderNameEdited, setPlaceholderNameEdited] = useState(false);
   const [placeholderInstances, setPlaceholderInstances] = useState<PlaceholderInstance[]>([]);
+  const [designerSessionHydrated, setDesignerSessionHydrated] = useState(false);
+  const hydratedSignatureRef = useRef<string | null>(null);
 
   const [typeDropdownOpen, setTypeDropdownOpen] = useState(false);
   const [sizeDropdownOpen, setSizeDropdownOpen] = useState(false);
@@ -372,6 +486,11 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
     return [...baseBuildings, ...customBuildings];
   }, [baseBuildings, customBuildings]);
 
+  const designerDataSignature = useMemo(() => {
+    if (!data) return null;
+    return getDesignerDataSignature(data);
+  }, [data]);
+
   const buildingById = useMemo(() => {
     const map = new Map<number, DesignerBuilding>();
     for (const b of allBuildings) map.set(b.entry.id, b);
@@ -482,6 +601,106 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
       return next;
     });
   }, [allBuildings]);
+
+  useEffect(() => {
+    setDesignerSessionHydrated(false);
+  }, [designerDataSignature]);
+
+  useEffect(() => {
+    if (!designerDataSignature) return;
+    if (hydratedSignatureRef.current === designerDataSignature) return;
+    let cancelled = false;
+
+    void (async () => {
+      let parsed: Partial<DesignerSessionState> | null = await readDesignerSessionFromIndexedDb();
+
+      // Migration fallback for older localStorage-based designer session saves.
+      if (!parsed) {
+        try {
+          const raw = localStorage.getItem(DESIGNER_SESSION_STORAGE_KEY);
+          if (raw) parsed = JSON.parse(raw) as Partial<DesignerSessionState>;
+        } catch {
+          parsed = null;
+        }
+      }
+
+      if (!cancelled && parsed?.version === 1 && parsed.dataSignature === designerDataSignature) {
+        const allIds = new Set(allBuildings.map(b => b.entry.id));
+
+        const nextPositions = new Map<number, { x: number; y: number }>();
+        for (const b of allBuildings) {
+          nextPositions.set(b.entry.id, { x: b.x, y: b.y });
+        }
+
+        for (const rec of parsed.positions ?? []) {
+          if (!rec || typeof rec !== 'object') continue;
+          if (typeof rec.id !== 'number' || !allIds.has(rec.id)) continue;
+          if (typeof rec.x !== 'number' || !Number.isFinite(rec.x)) continue;
+          if (typeof rec.y !== 'number' || !Number.isFinite(rec.y)) continue;
+          nextPositions.set(rec.id, { x: rec.x, y: rec.y });
+        }
+
+        const nextParkedIds = new Set<number>();
+        for (const id of parsed.parkedIds ?? []) {
+          if (typeof id === 'number' && allIds.has(id)) nextParkedIds.add(id);
+        }
+
+        const nextMarkedForDeletionIds = new Set<number>();
+        for (const id of parsed.markedForDeletionIds ?? []) {
+          if (typeof id === 'number' && nextParkedIds.has(id)) nextMarkedForDeletionIds.add(id);
+        }
+
+        const nextPlaceholderInstances: PlaceholderInstance[] = [];
+        for (const inst of parsed.placeholderInstances ?? []) {
+          if (!inst || typeof inst !== 'object') continue;
+          if (typeof inst.id !== 'number' || !Number.isFinite(inst.id)) continue;
+          if (typeof inst.templateId !== 'number' || !Number.isFinite(inst.templateId)) continue;
+          nextPlaceholderInstances.push({ id: inst.id, templateId: inst.templateId });
+        }
+
+        setPlaceholderInstances(nextPlaceholderInstances);
+        setPositions(nextPositions);
+        setParkedIds(nextParkedIds);
+        setMarkedForDeletionIds(nextMarkedForDeletionIds);
+      }
+
+      if (!cancelled) {
+        hydratedSignatureRef.current = designerDataSignature;
+        setDesignerSessionHydrated(true);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [designerDataSignature, allBuildings]);
+
+  useEffect(() => {
+    if (!designerDataSignature || !designerSessionHydrated) return;
+
+    try {
+      const allIds = new Set(allBuildings.map(b => b.entry.id));
+      const positionsPayload: DesignerSessionState['positions'] = [];
+      for (const [id, pos] of positions) {
+        if (!allIds.has(id)) continue;
+        if (!Number.isFinite(pos.x) || !Number.isFinite(pos.y)) continue;
+        positionsPayload.push({ id, x: pos.x, y: pos.y });
+      }
+
+      const payload: DesignerSessionState = {
+        version: 1,
+        dataSignature: designerDataSignature,
+        savedAt: Date.now(),
+        positions: positionsPayload,
+        parkedIds: [...parkedIds].filter(id => allIds.has(id)),
+        markedForDeletionIds: [...markedForDeletionIds].filter(id => parkedIds.has(id) && allIds.has(id)),
+        placeholderInstances,
+      };
+      void writeDesignerSessionToIndexedDb(payload);
+    } catch {
+      // Ignore storage failures.
+    }
+  }, [designerDataSignature, designerSessionHydrated, allBuildings, positions, parkedIds, markedForDeletionIds, placeholderInstances]);
 
   useEffect(() => {
     if (bounds && !viewBox) {
