@@ -791,6 +791,19 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
       .filter(b => Number.isFinite(b.x) && Number.isFinite(b.y));
   }, [allBuildings, parkedIds, positions]);
 
+  const unusedCellsCount = useMemo(() => {
+    const occupiedCells = new Set<string>();
+    for (const building of mapBuildings) {
+      for (let dx = 0; dx < building.width; dx++) {
+        for (let dy = 0; dy < building.length; dy++) {
+          const key = `${building.x + dx},${building.y + dy}`;
+          if (unlockedCells.has(key)) occupiedCells.add(key);
+        }
+      }
+    }
+    return Math.max(0, unlockedCells.size - occupiedCells.size);
+  }, [mapBuildings, unlockedCells]);
+
   const mapPresentSizes = useMemo(() => {
     const sizes = new Set<string>();
     for (const b of mapBuildings) sizes.add(b.sizeKey);
@@ -2798,8 +2811,12 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
               <span className="designer-summary-value">{parkedIds.size - markedForDeletionIds.size}</span>
             </div>
             <div className="designer-summary-item marked-for-deletion">
-              <span className="designer-summary-label">Marked:</span>
+              <span className="designer-summary-label">Deleting:</span>
               <span className="designer-summary-value">{markedForDeletionIds.size}</span>
+            </div>
+            <div className="designer-summary-item">
+              <span className="designer-summary-label">Unused:</span>
+              <span className="designer-summary-value">{unusedCellsCount}</span>
             </div>
             {validationRan && (
               <div className={`designer-summary-item validation-status ${validationInvalidIds.size > 0 ? 'invalid' : 'valid'}`}>
