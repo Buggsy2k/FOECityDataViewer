@@ -3451,20 +3451,31 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
                 />
                   );
                 })()}
-                {b.entry.type !== 'street' && (
+                {b.entry.type !== 'street' && (() => {
+                  const wPx = b.width * CELL_SIZE - 1;
+                  const hPx = b.length * CELL_SIZE - 1;
+                  const rotated = b.length > b.width;
+                  // After rotation the inner content's effective box is hPx x wPx.
+                  const innerW = rotated ? hPx : wPx;
+                  const innerH = rotated ? wPx : hPx;
+                  return (
                   <foreignObject
                     x={b.x * CELL_SIZE + 0.5}
                     y={b.y * CELL_SIZE + 0.5}
-                    width={b.width * CELL_SIZE - 1}
-                    height={b.length * CELL_SIZE - 1}
+                    width={wPx}
+                    height={hPx}
                     pointerEvents="none"
                   >
                     <div
                       // @ts-expect-error xmlns is valid on HTML inside foreignObject
                       xmlns="http://www.w3.org/1999/xhtml"
                       style={{
-                        width: '100%',
-                        height: '100%',
+                        width: `${innerW}px`,
+                        height: `${innerH}px`,
+                        transform: rotated
+                          ? `translate(${wPx}px, 0) rotate(90deg)`
+                          : undefined,
+                        transformOrigin: '0 0',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
@@ -3484,7 +3495,8 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
                       {fullName}
                     </div>
                   </foreignObject>
-                )}
+                  );
+                })()}
               </g>
               );
             })}
