@@ -127,6 +127,9 @@ const ROAD_NEED_LABELS: Record<RoadNeed, string> = {
 };
 
 const INHERENT_NO_ROAD_TYPES = new Set(['street', 'main_building', 'tower', 'hub_main', 'hub_part', 'decoration']);
+// Types that are intentionally OK to be adjacent to roads (exempt from the wasted-road warning).
+// Intentionally excludes 'tower' — towers should not touch roads.
+const ROAD_ADJACENT_OK_TYPES = new Set(['street', 'main_building', 'hub_main', 'hub_part', 'decoration']);
 const PLACEHOLDER_BASE_COLOR = '#19c5e8';
 
 function pointInRect(x: number, y: number, rect: DOMRect): boolean {
@@ -834,6 +837,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
     const connectedStreetIds2x2 = new Set<number>();
     const connectedBuildingIdsAny = new Set<number>();
     const connectedBuildingIds2x2 = new Set<number>();
+    const adjacentToAnyStreetIds = new Set<number>();
     const mainBuilding = placed.find(b => b.entry.type === 'main_building') ?? null;
 
     const isTwoByTwoStreet = (building: DesignerBuilding): boolean => (
@@ -934,8 +938,11 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
       const requiredStreetLevel = getRequiredStreetLevelFor(building);
       for (const cell of getEdgeCells(building)) {
         const anyStreetId = streetByCellAny.get(cell);
-        if (anyStreetId != null && connectedStreetIdsAny.has(anyStreetId)) {
-          connectedBuildingIdsAny.add(building.entry.id);
+        if (anyStreetId != null) {
+          adjacentToAnyStreetIds.add(building.entry.id);
+          if (connectedStreetIdsAny.has(anyStreetId)) {
+            connectedBuildingIdsAny.add(building.entry.id);
+          }
         }
 
         if (requiredStreetLevel >= 2) {
@@ -954,6 +961,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
       connectedStreetIdsAny,
       connectedBuildingIdsAny,
       connectedBuildingIds2x2,
+      adjacentToAnyStreetIds,
     };
   }, [getRequiredStreetLevelFor]);
 
@@ -991,8 +999,8 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
           ? connectivity.connectedBuildingIds2x2.has(id)
           : connectivity.connectedBuildingIdsAny.has(id);
         if (!isConnected) return false;
-      } else if (!INHERENT_NO_ROAD_TYPES.has(building.entry.type)) {
-        if (connectivity.connectedBuildingIdsAny.has(id)) return false;
+      } else if (!ROAD_ADJACENT_OK_TYPES.has(building.entry.type)) {
+        if (connectivity.adjacentToAnyStreetIds.has(id)) return false;
       }
     }
 
@@ -2265,8 +2273,8 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
           ? connectivity.connectedBuildingIds2x2.has(id)
           : connectivity.connectedBuildingIdsAny.has(id);
         if (!ok) invalid.add(id);
-      } else if (!INHERENT_NO_ROAD_TYPES.has(b.entry.type)) {
-        if (connectivity.connectedBuildingIdsAny.has(id)) {
+      } else if (!ROAD_ADJACENT_OK_TYPES.has(b.entry.type)) {
+        if (connectivity.adjacentToAnyStreetIds.has(id)) {
           invalid.add(id);
         }
       }

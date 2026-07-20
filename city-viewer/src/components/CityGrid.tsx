@@ -185,6 +185,7 @@ export default function CityGrid() {
     const connectedStreetIds2x2 = new Set<number>();
     const connectedBuildingIdsAny = new Set<number>();
     const connectedBuildingIds2x2 = new Set<number>();
+    const adjacentToAnyStreetIds = new Set<number>();
     const mainBuilding = allBuildings.find(b => b.entry.type === 'main_building') ?? null;
 
     const isTwoByTwoStreet = (building: PlacedBuilding): boolean => {
@@ -298,8 +299,11 @@ export default function CityGrid() {
       const requiredStreetLevel = getRequiredStreetLevel(building);
       for (const cell of getEdgeCells(building)) {
         const anyStreetId = streetByCellAny.get(cell);
-        if (anyStreetId != null && connectedStreetIdsAny.has(anyStreetId)) {
-          connectedBuildingIdsAny.add(building.entry.id);
+        if (anyStreetId != null) {
+          adjacentToAnyStreetIds.add(building.entry.id);
+          if (connectedStreetIdsAny.has(anyStreetId)) {
+            connectedBuildingIdsAny.add(building.entry.id);
+          }
         }
 
         if (requiredStreetLevel >= 2) {
@@ -324,6 +328,7 @@ export default function CityGrid() {
       connectedStreetIds2x2,
       connectedBuildingIdsAny,
       connectedBuildingIds2x2,
+      adjacentToAnyStreetIds,
     };
   }, [allBuildings, data]);
 
@@ -496,6 +501,7 @@ export default function CityGrid() {
     let wastedRoadCount = 0;
     let orphanRoadCount = 0;
     const inherent = new Set(['street', 'main_building', 'tower', 'hub_main', 'hub_part', 'decoration']);
+    const roadAdjacentOkTypes = new Set(['street', 'main_building', 'hub_main', 'hub_part', 'decoration']);
     const typeCounts = new Map<string, number>();
 
     for (const b of allBuildings) {
@@ -518,8 +524,8 @@ export default function CityGrid() {
             ? roadConnectivity.connectedBuildingIds2x2.has(b.entry.id)
             : roadConnectivity.connectedBuildingIdsAny.has(b.entry.id);
           if (!ok) disconnectedCount++;
-        } else if (!inherent.has(b.entry.type)) {
-          if (roadConnectivity.connectedBuildingIdsAny.has(b.entry.id)) wastedRoadCount++;
+        } else if (!roadAdjacentOkTypes.has(b.entry.type)) {
+          if (roadConnectivity.adjacentToAnyStreetIds.has(b.entry.id)) wastedRoadCount++;
         }
       }
     }
@@ -737,6 +743,7 @@ export default function CityGrid() {
             const dimmed = hasSearch && !isMatch && !isHovered;
             const entity = data.CityEntities?.[b.entry.cityentity_id];
             const inherent = new Set(['street', 'main_building', 'tower', 'hub_main', 'hub_part', 'decoration']);
+            const roadAdjacentOkTypes = new Set(['street', 'main_building', 'hub_main', 'hub_part', 'decoration']);
             const isStreet = b.entry.type === 'street';
             const isTwoByTwoStreet = isStreet && b.width === 2 && b.length === 2;
             const rootStreetLevel = entity?.requirements?.street_connection_level ?? 0;
@@ -752,9 +759,8 @@ export default function CityGrid() {
             const hasConnectedRoadPath = requires2x2RoadPath
               ? roadConnectivity.connectedBuildingIds2x2.has(b.entry.id)
               : roadConnectivity.connectedBuildingIdsAny.has(b.entry.id);
-            const hasAnyConnectedRoadPath = roadConnectivity.connectedBuildingIdsAny.has(b.entry.id);
             const disconnected = needsRoad && !hasConnectedRoadPath;
-            const wastedRoad = !needsRoad && hasAnyConnectedRoadPath && !inherent.has(b.entry.type);
+            const wastedRoad = !needsRoad && roadConnectivity.adjacentToAnyStreetIds.has(b.entry.id) && !roadAdjacentOkTypes.has(b.entry.type);
             const orphanRoad = isStreet && !roadConnectivity.connectedStreetIdsAny.has(b.entry.id);
             const showBorder = (needsRoad || wastedRoad || orphanRoad) && !dimmed;
             const isRed = disconnected || wastedRoad || orphanRoad;
