@@ -2917,7 +2917,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
             </div>
             {validationRan && (
               <div className={`designer-summary-item validation-status ${validationInvalidIds.size > 0 ? 'invalid' : 'valid'}`}>
-                <span className="designer-summary-label">{validationInvalidIds.size > 0 ? 'Invalid:' : 'Valid:'}</span>
+                <span className="designer-summary-label">{validationInvalidIds.size > 0 ? 'Road Violation:' : 'Valid:'}</span>
                 <span className="designer-summary-value">{validationInvalidIds.size > 0 ? validationInvalidIds.size : '✓'}</span>
               </div>
             )}
@@ -3473,7 +3473,9 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
                         width: `${innerW}px`,
                         height: `${innerH}px`,
                         transform: rotated
-                          ? `translate(${wPx}px, 0) rotate(90deg)`
+                          ? (isRotated45
+                              ? `translate(0, ${hPx}px) rotate(270deg)`
+                              : `translate(${wPx}px, 0) rotate(90deg)`)
                           : undefined,
                         transformOrigin: '0 0',
                         display: 'flex',

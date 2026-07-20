@@ -926,7 +926,9 @@ export default function CityGrid() {
                           width: `${innerW}px`,
                           height: `${innerH}px`,
                           transform: rotated
-                            ? `translate(${wPx}px, 0) rotate(90deg)`
+                            ? (isRotated45
+                                ? `translate(0, ${hPx}px) rotate(270deg)`
+                                : `translate(${wPx}px, 0) rotate(90deg)`)
                             : undefined,
                           transformOrigin: '0 0',
                           display: 'flex',
