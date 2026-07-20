@@ -2466,12 +2466,26 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
 
     const fullBounds = getGridBounds(data.UnlockedAreas, mapBuildings);
     const padCells = 2;
-    const exportView = {
-      x: (fullBounds.minX - padCells) * CELL_SIZE,
-      y: (fullBounds.minY - padCells) * CELL_SIZE,
-      w: (fullBounds.width + padCells * 2) * CELL_SIZE,
-      h: (fullBounds.height + padCells * 2) * CELL_SIZE,
-    };
+    const mapX = (fullBounds.minX - padCells) * CELL_SIZE;
+    const mapY = (fullBounds.minY - padCells) * CELL_SIZE;
+    const mapW = (fullBounds.width + padCells * 2) * CELL_SIZE;
+    const mapH = (fullBounds.height + padCells * 2) * CELL_SIZE;
+
+    // The content group applies the ISO matrix (0.7071,0.3536,-0.7071,0.3536,0,0) when rotated,
+    // so the exported viewBox must be expressed in ISO coordinates to fully contain the map.
+    const exportView = isRotated45
+      ? {
+          x: 0.7071 * (mapX - mapY - mapH),
+          y: 0.3536 * (mapX + mapY),
+          w: 0.7071 * (mapW + mapH),
+          h: 0.3536 * (mapW + mapH),
+        }
+      : {
+          x: mapX,
+          y: mapY,
+          w: mapW,
+          h: mapH,
+        };
 
     const exportWidth = Math.max(1, Math.round(exportView.w));
     const exportHeight = Math.max(1, Math.round(exportView.h));
@@ -2551,7 +2565,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
     } catch {
       window.alert('Failed to export the current map image as JPG.');
     }
-  }, [data, mapBuildings]);
+  }, [data, mapBuildings, isRotated45]);
 
   const importLayoutsFromFile = useCallback((file: File) => {
     const reader = new FileReader();
