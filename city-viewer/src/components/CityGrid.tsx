@@ -941,7 +941,7 @@ export default function CityGrid() {
                           lineHeight: 1,
                           color: '#fff',
                           textShadow: '0 0 1px rgba(0,0,0,0.9), 0 0 1.5px rgba(0,0,0,0.7)',
-                          fontWeight: 700,
+                          fontWeight: 600,
                           fontStretch: 'condensed',
                           letterSpacing: '-0.05px',
                           wordBreak: 'break-word',
