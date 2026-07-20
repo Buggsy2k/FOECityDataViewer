@@ -3487,8 +3487,8 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
                         fontSize: '4px',
                         lineHeight: 1,
                         color: '#fff',
-                        textShadow: '0 0 1px rgba(0,0,0,0.95), 0 0 1px rgba(0,0,0,0.95)',
-                        fontWeight: 300,
+                        textShadow: '0 0 1px rgba(0,0,0,0.9), 0 0 1.5px rgba(0,0,0,0.7)',
+                        fontWeight: 700,
                         wordBreak: 'break-word',
                       }}
                     >
