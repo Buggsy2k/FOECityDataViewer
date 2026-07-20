@@ -253,6 +253,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
   const svgRef = useRef<SVGSVGElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLElement>(null);
+  const contentGroupRef = useRef<SVGGElement>(null);
   const historyRef = useRef<LayoutSnapshot[]>([]);
   const redoHistoryRef = useRef<LayoutSnapshot[]>([]);
   const positionsRef = useRef<Map<number, { x: number; y: number }>>(new Map());
@@ -261,8 +262,9 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
 
   const [viewBox, setViewBox] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const [isPanning, setIsPanning] = useState(false);
+  const [isRotated45, setIsRotated45] = useState(false);
   const [dragState, setDragState] = useState<DragState | null>(null);
-  const panStart = useRef({ x: 0, y: 0, vx: 0, vy: 0 });
+  const panStart = useRef({ x: 0, y: 0, vx: 0, vy: 0, ctmA: 1, ctmB: 0, ctmC: 0, ctmD: 1 });
   const isCtrlPanningRef = useRef(false);
   const suppressDropOnMouseUpRef = useRef(false);
 
@@ -745,13 +747,78 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
       viewH = mapW / wrapperAspect;
     }
 
+    // With scale(1/√2) scaleY(0.5) rotate(45deg) the diamond fits exactly within the
+    // wrapper (no horizontal overflow). Diamond screen extents:
+    //   width  = (mapW + mapH) / 2
+    //   height = (mapW + mapH) / 4
+    if (isRotated45) {
+      // The content group uses isometric transform: matrix(0.7071, 0.3536, -0.7071, 0.3536, 0, 0)
+      // Grid (gx, gy) maps to ISO: (0.7071*gx - 0.7071*gy, 0.3536*gx + 0.3536*gy)
+      // Map extents:
+      //   iso_width  = 0.7071 * (mapW + mapH)
+      //   iso_height = 0.3536 * (mapW + mapH)
+      const isoCx = 0.7071 * (mapX + mapW / 2 - mapY - mapH / 2);
+      const isoCy = 0.3536 * (mapX + mapW / 2 + mapY + mapH / 2);
+      const k = Math.max(
+        0.7071 * (mapW + mapH) / wrapperW,
+        0.3536 * (mapW + mapH) / wrapperH,
+      );
+      setViewBox({
+        x: isoCx - k * wrapperW / 2,
+        y: isoCy - k * wrapperH / 2,
+        w: k * wrapperW,
+        h: k * wrapperH,
+      });
+      return;
+    }
+
     setViewBox({
       x: mapX - (viewW - mapW) / 2,
       y: mapY - (viewH - mapH) / 2,
       w: viewW,
       h: viewH,
     });
-  }, [bounds]);
+  }, [bounds, isRotated45]);
+
+  // Toggle 45° rotation while keeping the current viewport focal point centered.
+  // The viewBox lives in different coordinate spaces depending on the mode:
+  //   - orthographic: viewBox is in grid-local coordinates
+  //   - rotated:      viewBox is in ISO coordinates (post matrix(0.7071,0.3536,-0.7071,0.3536,0,0))
+  // So we convert the current center to grid-local, then re-express it in the target space.
+  const toggleRotation = useCallback(() => {
+    // 1 local unit maps to a diagonal ISO vector of length sqrt(0.7071^2 + 0.3536^2).
+    const contentScale = Math.sqrt(0.7071 * 0.7071 + 0.3536 * 0.3536);
+    setViewBox(prev => {
+      if (!prev) return prev;
+      const vcx = prev.x + prev.w / 2;
+      const vcy = prev.y + prev.h / 2;
+      // Convert current viewport center to grid-local coordinates.
+      let localX: number;
+      let localY: number;
+      if (isRotated45) {
+        // Invert the ISO matrix (det = a*d - b*c = 0.5).
+        localX = (0.3536 * vcx + 0.7071 * vcy) / 0.5;
+        localY = (0.7071 * vcy - 0.3536 * vcx) / 0.5;
+      } else {
+        localX = vcx;
+        localY = vcy;
+      }
+      const targetRotated = !isRotated45;
+      if (targetRotated) {
+        // Re-express the focal point in ISO coordinates; shrink viewBox to keep pixel scale.
+        const isoCx = 0.7071 * (localX - localY);
+        const isoCy = 0.3536 * (localX + localY);
+        const w = prev.w * contentScale;
+        const h = prev.h * contentScale;
+        return { x: isoCx - w / 2, y: isoCy - h / 2, w, h };
+      }
+      // Going back to orthographic: focal point is grid-local; grow viewBox back.
+      const w = prev.w / contentScale;
+      const h = prev.h / contentScale;
+      return { x: localX - w / 2, y: localY - h / 2, w, h };
+    });
+    setIsRotated45(v => !v);
+  }, [isRotated45]);
 
   const presentTypes = useMemo(() => {
     const types = new Set<string>();
@@ -1198,8 +1265,11 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
     if (!rect.width || !rect.height) return null;
     if (!pointInRect(clientX, clientY, rect)) return null;
 
-    // Convert from screen coordinates to SVG world coordinates, accounting for aspect-ratio fitting.
-    const ctm = svg.getScreenCTM();
+    // When rotated, use the content group's CTM so screen coords map to grid (group-local) coords.
+    // Without rotation, the group has no transform so svg.getScreenCTM() is equivalent.
+    const ctm = isRotated45
+      ? (contentGroupRef.current?.getScreenCTM() ?? svg.getScreenCTM())
+      : svg.getScreenCTM();
     if (!ctm) return null;
     const point = svg.createSVGPoint();
     point.x = clientX;
@@ -1210,7 +1280,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
     const gy = Math.floor(world.y / CELL_SIZE);
     if (!Number.isFinite(gx) || !Number.isFinite(gy)) return null;
     return { x: gx, y: gy };
-  }, []);
+  }, [isRotated45]);
 
   const screenToGridRef = useRef(screenToGrid);
   useEffect(() => { screenToGridRef.current = screenToGrid; }, [screenToGrid]);
@@ -1763,9 +1833,17 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
     e.stopPropagation();
     setViewBox(prev => {
       if (!prev || !svgRef.current) return prev;
-      const rect = svgRef.current.getBoundingClientRect();
-      const mx = (e.clientX - rect.left) / rect.width;
-      const my = (e.clientY - rect.top) / rect.height;
+      // Use CTM so zoom focus is correct even when the SVG is CSS-rotated.
+      const ctm = svgRef.current.getScreenCTM();
+      let mx = 0.5, my = 0.5;
+      if (ctm) {
+        const pt = svgRef.current.createSVGPoint();
+        pt.x = e.clientX;
+        pt.y = e.clientY;
+        const world = pt.matrixTransform(ctm.inverse());
+        mx = (world.x - prev.x) / prev.w;
+        my = (world.y - prev.y) / prev.h;
+      }
       const scale = e.deltaY > 0 ? 1.1 : 0.9;
       const newW = Math.min(Math.max(prev.w * scale, MIN_VIEW), MAX_VIEW);
       const actualScale = newW / prev.w;
@@ -1956,12 +2034,11 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
       isCtrlPanningRef.current = true;
       suppressDropOnMouseUpRef.current = true;
       setIsPanning(true);
+      const ctm = svgRef.current?.getScreenCTM() ?? null;
       setViewBox(prev => {
         panStart.current = {
-          x: e.clientX,
-          y: e.clientY,
-          vx: prev?.x ?? 0,
-          vy: prev?.y ?? 0,
+          x: e.clientX, y: e.clientY, vx: prev?.x ?? 0, vy: prev?.y ?? 0,
+          ctmA: ctm?.a ?? 1, ctmB: ctm?.b ?? 0, ctmC: ctm?.c ?? 0, ctmD: ctm?.d ?? 1,
         };
         return prev;
       });
@@ -1970,12 +2047,11 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
 
     if (dragState) return;
     setIsPanning(true);
+    const ctm2 = svgRef.current?.getScreenCTM() ?? null;
     setViewBox(prev => {
       panStart.current = {
-        x: e.clientX,
-        y: e.clientY,
-        vx: prev?.x ?? 0,
-        vy: prev?.y ?? 0,
+        x: e.clientX, y: e.clientY, vx: prev?.x ?? 0, vy: prev?.y ?? 0,
+        ctmA: ctm2?.a ?? 1, ctmB: ctm2?.b ?? 0, ctmC: ctm2?.c ?? 0, ctmD: ctm2?.d ?? 1,
       };
       return prev;
     });
@@ -1992,15 +2068,20 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
 
     if (!isPanning || !svgRef.current) return;
     if (dragState && !isCtrlPanningRef.current) return;
-    const rect = svgRef.current.getBoundingClientRect();
     setViewBox(prev => {
       if (!prev) return prev;
-      const dx = (e.clientX - panStart.current.x) * (prev.w / rect.width);
-      const dy = (e.clientY - panStart.current.y) * (prev.h / rect.height);
+      // Transform screen delta to SVG-world delta using the CTM captured at pan start.
+      const screenDx = e.clientX - panStart.current.x;
+      const screenDy = e.clientY - panStart.current.y;
+      const { ctmA, ctmB, ctmC, ctmD } = panStart.current;
+      const det = ctmA * ctmD - ctmB * ctmC;
+      if (Math.abs(det) < 1e-10) return prev;
+      const svgDx = (ctmD * screenDx - ctmC * screenDy) / det;
+      const svgDy = (-ctmB * screenDx + ctmA * screenDy) / det;
       return {
         ...prev,
-        x: panStart.current.vx - dx,
-        y: panStart.current.vy - dy,
+        x: panStart.current.vx - svgDx,
+        y: panStart.current.vy - svgDy,
       };
     });
   }, [isPanning, dragState, selectionRegion]);
@@ -2739,6 +2820,14 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
             📍
           </button>
           <button
+            className={`grid-dropdown-btn designer-icon-btn ${isRotated45 ? 'active' : ''}`}
+            title={isRotated45 ? 'Switch to orthographic view' : 'Rotate map 45\u00b0 (diamond view)'}
+            onClick={() => toggleRotation()}
+            aria-label={isRotated45 ? 'Unrotate map' : 'Rotate map 45\u00b0'}
+          >
+            {isRotated45 ? '\u25a2' : '\u25c8'}
+          </button>
+          <button
             className="grid-dropdown-btn designer-icon-btn"
             title="Fit map to available space"
             onClick={fitToScreen}
@@ -3232,7 +3321,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
         <div
           className="grid-wrapper"
           ref={wrapperCallbackRef}
-          style={{ position: 'relative', cursor: mapCursor }}
+          style={{ position: 'relative', overflow: 'hidden', cursor: mapCursor }}
           onWheelCapture={handleWrapperWheel}
           onMouseDown={handleMouseDown}
           onContextMenu={(e) => e.preventDefault()}
@@ -3254,6 +3343,17 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
                 <rect width="3" height="8" fill="rgba(0,0,0,0.7)" />
               </pattern>
             </defs>
+
+            {/* All rendered content sits inside this group. When isRotated45, the group applies
+                an SVG isometric transform: grid (local) → ISO (SVG-world) space, so the map fills
+                the full viewport without CSS-transform diamond-clipping. The SVG viewBox is in ISO
+                coordinates; svg.getScreenCTM() handles pan/zoom, contentGroupRef.getScreenCTM()
+                handles drag (maps screen → grid-local).
+                Matrix: (0.7071, 0.3536, -0.7071, 0.3536, 0, 0) maps:
+                  grid(1,0) → screen(0.7071, 0.3536)  [right-down]
+                  grid(0,1) → screen(-0.7071, 0.3536) [left-down]
+            */}
+            <g ref={contentGroupRef} transform={isRotated45 ? 'matrix(0.7071,0.3536,-0.7071,0.3536,0,0)' : undefined}>
 
             {data.UnlockedAreas.map((area, i) => {
               const ax = area.x ?? 0;
@@ -3482,6 +3582,7 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
                 />
               );
             })()}
+            </g>  {/* end content group */}
           </svg>
         </div>
       </div>

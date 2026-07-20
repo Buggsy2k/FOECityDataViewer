@@ -29,11 +29,13 @@ export default function CityGrid() {
   const { data } = useCityData();
   const svgRef = useRef<SVGSVGElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const contentGroupRef = useRef<SVGGElement>(null);
   const [hoveredBuilding, setHoveredBuilding] = useState<PlacedBuilding | null>(null);
   const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
   const [viewBox, setViewBox] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const [isPanning, setIsPanning] = useState(false);
-  const panStart = useRef({ x: 0, y: 0, vx: 0, vy: 0 });
+  const [isRotated45, setIsRotated45] = useState(false);
+  const panStart = useRef({ x: 0, y: 0, vx: 0, vy: 0, ctmA: 1, ctmB: 0, ctmC: 0, ctmD: 1 });
 
   // Filter state
   const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set());
@@ -383,13 +385,76 @@ export default function CityGrid() {
       viewH = mapW / wrapperAspect;
     }
 
+    // With scale(1/√2) scaleY(0.5) rotate(45deg) the diamond fits exactly within the
+    // wrapper (no horizontal overflow). Diamond screen extents:
+    //   width  = (mapW + mapH) / 2
+    //   height = (mapW + mapH) / 4
+    if (isRotated45) {
+      // The content group uses isometric transform: matrix(0.7071, 0.3536, -0.7071, 0.3536, 0, 0)
+      // Grid (gx, gy) maps to ISO: (0.7071*gx - 0.7071*gy, 0.3536*gx + 0.3536*gy)
+      //   iso_width  = 0.7071*(mapW+mapH)   iso_height = 0.3536*(mapW+mapH)
+      const isoCx = 0.7071 * (mapX + mapW / 2 - mapY - mapH / 2);
+      const isoCy = 0.3536 * (mapX + mapW / 2 + mapY + mapH / 2);
+      const k = Math.max(
+        0.7071 * (mapW + mapH) / wrapperW,
+        0.3536 * (mapW + mapH) / wrapperH,
+      );
+      setViewBox({
+        x: isoCx - k * wrapperW / 2,
+        y: isoCy - k * wrapperH / 2,
+        w: k * wrapperW,
+        h: k * wrapperH,
+      });
+      return;
+    }
+
     setViewBox({
       x: mapX - (viewW - mapW) / 2,
       y: mapY - (viewH - mapH) / 2,
       w: viewW,
       h: viewH,
     });
-  }, [bounds]);
+  }, [bounds, isRotated45]);
+
+  // Toggle 45° rotation while keeping the current viewport focal point centered.
+  // The viewBox lives in different coordinate spaces depending on the mode:
+  //   - orthographic: viewBox is in grid-local coordinates
+  //   - rotated:      viewBox is in ISO coordinates (post matrix(0.7071,0.3536,-0.7071,0.3536,0,0))
+  // So we convert the current center to grid-local, then re-express it in the target space.
+  const toggleRotation = useCallback(() => {
+    // 1 local unit maps to a diagonal ISO vector of length sqrt(0.7071^2 + 0.3536^2).
+    const contentScale = Math.sqrt(0.7071 * 0.7071 + 0.3536 * 0.3536);
+    setViewBox(prev => {
+      if (!prev) return prev;
+      const vcx = prev.x + prev.w / 2;
+      const vcy = prev.y + prev.h / 2;
+      // Convert current viewport center to grid-local coordinates.
+      let localX: number;
+      let localY: number;
+      if (isRotated45) {
+        // Invert the ISO matrix (det = a*d - b*c = 0.5).
+        localX = (0.3536 * vcx + 0.7071 * vcy) / 0.5;
+        localY = (0.7071 * vcy - 0.3536 * vcx) / 0.5;
+      } else {
+        localX = vcx;
+        localY = vcy;
+      }
+      const targetRotated = !isRotated45;
+      if (targetRotated) {
+        // Re-express the focal point in ISO coordinates; shrink viewBox to keep pixel scale.
+        const isoCx = 0.7071 * (localX - localY);
+        const isoCy = 0.3536 * (localX + localY);
+        const w = prev.w * contentScale;
+        const h = prev.h * contentScale;
+        return { x: isoCx - w / 2, y: isoCy - h / 2, w, h };
+      }
+      // Going back to orthographic: focal point is grid-local; grow viewBox back.
+      const w = prev.w / contentScale;
+      const h = prev.h / contentScale;
+      return { x: localX - w / 2, y: localY - h / 2, w, h };
+    });
+    setIsRotated45(v => !v);
+  }, [isRotated45]);
 
   const handleWheel = useCallback((e: WheelEvent) => {
     e.preventDefault();
@@ -400,9 +465,17 @@ export default function CityGrid() {
       const svg = svgRef.current;
       if (!svg) return prev;
 
-      const rect = svg.getBoundingClientRect();
-      const mx = (e.clientX - rect.left) / rect.width;
-      const my = (e.clientY - rect.top) / rect.height;
+      // Use CTM so zoom focus is correct even when the SVG is CSS-rotated.
+      const ctm = svg.getScreenCTM();
+      let mx = 0.5, my = 0.5;
+      if (ctm) {
+        const pt = svg.createSVGPoint();
+        pt.x = e.clientX;
+        pt.y = e.clientY;
+        const world = pt.matrixTransform(ctm.inverse());
+        mx = (world.x - prev.x) / prev.w;
+        my = (world.y - prev.y) / prev.h;
+      }
 
       const newW = Math.min(Math.max(prev.w * scale, MIN_VIEW), MAX_VIEW);
       const actualScale = newW / prev.w;
@@ -430,6 +503,8 @@ export default function CityGrid() {
       e.preventDefault();
       e.stopPropagation();
     }
+    // Capture CTM at drag-start so pan delta is correct under any CSS rotation.
+    const ctm = svgRef.current?.getScreenCTM() ?? null;
     setIsPanning(true);
     setViewBox(prev => {
       panStart.current = {
@@ -437,22 +512,29 @@ export default function CityGrid() {
         y: e.clientY,
         vx: prev?.x ?? 0,
         vy: prev?.y ?? 0,
+        ctmA: ctm?.a ?? 1, ctmB: ctm?.b ?? 0, ctmC: ctm?.c ?? 0, ctmD: ctm?.d ?? 1,
       };
       return prev;
     });
   }, []);
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
-    if (!isPanning || !svgRef.current) return;
-    const rect = svgRef.current.getBoundingClientRect();
+    if (!isPanning) return;
     setViewBox(prev => {
       if (!prev) return prev;
-      const dx = (e.clientX - panStart.current.x) * (prev.w / rect.width);
-      const dy = (e.clientY - panStart.current.y) * (prev.h / rect.height);
+      // Transform screen delta to SVG-world delta using the CTM captured at pan start.
+      // This is correct for any CSS rotation applied to the SVG element.
+      const screenDx = e.clientX - panStart.current.x;
+      const screenDy = e.clientY - panStart.current.y;
+      const { ctmA, ctmB, ctmC, ctmD } = panStart.current;
+      const det = ctmA * ctmD - ctmB * ctmC;
+      if (Math.abs(det) < 1e-10) return prev;
+      const svgDx = (ctmD * screenDx - ctmC * screenDy) / det;
+      const svgDy = (-ctmB * screenDx + ctmA * screenDy) / det;
       return {
         ...prev,
-        x: panStart.current.vx - dx,
-        y: panStart.current.vy - dy,
+        x: panStart.current.vx - svgDx,
+        y: panStart.current.vy - svgDy,
       };
     });
   }, [isPanning]);
@@ -677,6 +759,13 @@ export default function CityGrid() {
           <div className="grid-export">
             <button
               className="grid-dropdown-btn"
+              title={isRotated45 ? 'Switch to orthographic view' : 'Rotate map 45° (diamond view)'}
+              onClick={toggleRotation}
+            >
+              {isRotated45 ? 'Unrotate' : 'Rotate 45°'}
+            </button>
+            <button
+              className="grid-dropdown-btn"
               title="Fit the full map into the visible working area"
               onClick={fitToScreen}
             >
@@ -690,7 +779,7 @@ export default function CityGrid() {
       <div
         className="grid-wrapper"
         ref={wrapperCallbackRef}
-        style={{ position: 'relative' }}
+        style={{ position: 'relative', overflow: 'hidden' }}
         onMouseDown={handleMouseDown}
         onContextMenu={(e) => e.preventDefault()}
         onMouseMove={handleMouseMove}
@@ -715,6 +804,15 @@ export default function CityGrid() {
               </feMerge>
             </filter>
           </defs>
+
+          {/* All rendered content is inside this group. When isRotated45, the group applies
+              an SVG isometric transform: grid (local) → ISO (SVG-world) space so the full
+              map fills the viewport without any CSS-transform diamond-clipping.
+              Matrix: (0.7071, 0.3536, -0.7071, 0.3536, 0, 0) maps:
+                grid(1,0) → screen(0.7071, 0.3536)  [right-down]
+                grid(0,1) → screen(-0.7071, 0.3536) [left-down]
+          */}
+          <g ref={contentGroupRef} transform={isRotated45 ? 'matrix(0.7071,0.3536,-0.7071,0.3536,0,0)' : undefined}>
 
           {/* Unlocked areas background — single fill per area, 1x1 grid overlay */}
           {data.UnlockedAreas.map((area, i) => (
@@ -858,7 +956,8 @@ export default function CityGrid() {
                 })()}
               </g>
             );
-          })}
+          })}  {/* end buildings map */}
+          </g>  {/* end content group */}
         </svg>
 
         {hoveredBuilding && (
