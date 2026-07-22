@@ -630,7 +630,20 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
       }
 
       if (!cancelled && parsed?.version === 1 && parsed.dataSignature === designerDataSignature) {
+        // Parse placeholder instances first so their ids are recognized as valid
+        // targets when restoring positions/parked state below. At hydration time
+        // `allBuildings` still only contains base buildings (placeholderInstances
+        // state is empty), so we must seed `allIds` with the restored instance ids.
+        const nextPlaceholderInstances: PlaceholderInstance[] = [];
+        for (const inst of parsed.placeholderInstances ?? []) {
+          if (!inst || typeof inst !== 'object') continue;
+          if (typeof inst.id !== 'number' || !Number.isFinite(inst.id)) continue;
+          if (typeof inst.templateId !== 'number' || !Number.isFinite(inst.templateId)) continue;
+          nextPlaceholderInstances.push({ id: inst.id, templateId: inst.templateId });
+        }
+
         const allIds = new Set(allBuildings.map(b => b.entry.id));
+        for (const inst of nextPlaceholderInstances) allIds.add(inst.id);
 
         const nextPositions = new Map<number, { x: number; y: number }>();
         for (const b of allBuildings) {
@@ -653,14 +666,6 @@ export default function CityDesigner({ isFullscreen, onFullscreenChange }: { isF
         const nextMarkedForDeletionIds = new Set<number>();
         for (const id of parsed.markedForDeletionIds ?? []) {
           if (typeof id === 'number' && nextParkedIds.has(id)) nextMarkedForDeletionIds.add(id);
-        }
-
-        const nextPlaceholderInstances: PlaceholderInstance[] = [];
-        for (const inst of parsed.placeholderInstances ?? []) {
-          if (!inst || typeof inst !== 'object') continue;
-          if (typeof inst.id !== 'number' || !Number.isFinite(inst.id)) continue;
-          if (typeof inst.templateId !== 'number' || !Number.isFinite(inst.templateId)) continue;
-          nextPlaceholderInstances.push({ id: inst.id, templateId: inst.templateId });
         }
 
         setPlaceholderInstances(nextPlaceholderInstances);
